@@ -1,0 +1,47 @@
+name: local-sync
+version: 0.1.0
+description: >
+  Peer-to-peer sync of a Hermes profile between machines on the same LAN:
+  user-authored skills, memories, SOUL.md, hooks and cron definitions. Devices
+  discover each other, pair with a 6-digit code, then sync with HMAC-signed
+  requests and a per-file three-way merge. config.yaml, .env and state.db are
+  never touched.
+author: Erkin
+license: MIT
+homepage: https://github.com/OWNER/local-sync
+tags: [sync, lan, profiles, skills, memory]
+
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.22.0"
+
+provides_tools:
+  - local_sync_status
+  - local_sync_peers
+  - local_sync_pair
+  - local_sync_accept
+  - local_sync_plan
+  - local_sync_apply
+
+config_schema:
+  sync_interval:
+    type: int
+    default: 300
+    label: Sync interval (seconds)
+    description: How often the background daemon reconciles with paired peers.
+  notify:
+    type: bool
+    default: true
+    label: Desktop notifications
+    description: Native toast when a device appears or asks to pair.
+  auto_start:
+    type: bool
+    default: true
+    label: Start the daemon on first tool call
+  roots:
+    type: list
+    default: [skills, memories, SOUL.md, hooks, desktop-plugins, cron]
+    label: Synced paths
+    description: Profile-relative paths. config.yaml, .env and state.db are never synced.
+
+capabilities: []

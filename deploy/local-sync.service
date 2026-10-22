@@ -1,0 +1,13 @@
+[Unit]
+Description=local-sync — LAN peer sync for Hermes profiles
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/algo/local-sync/bin/local-sync run
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

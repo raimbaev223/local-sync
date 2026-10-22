@@ -1,0 +1,16 @@
+[project]
+name = "local-sync"
+version = "0.1.0"
+description = "Peer-to-peer sync of a Hermes profile over the LAN"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Erkin"}]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/OWNER/local-sync"
+
+# No console-script entry point on purpose: this is a directory plugin
+# (plugin.yaml + __init__.py), not a pip-distributed one. Use bin/local-sync
+# for the standalone CLI.
