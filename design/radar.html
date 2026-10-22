@@ -34,9 +34,12 @@
   .ring{fill:none;stroke:var(--line);stroke-width:1}
   .ring.dash{stroke-dasharray:2 6;stroke:#2c3542}
   .cross{stroke:#1e2530;stroke-width:1}
-  .sweep{transform-origin:50% 50%;animation:spin 4.2s linear infinite}
-  .sweep.paused{animation-play-state:paused}
-  @keyframes spin{to{transform:rotate(360deg)}}
+  .ripple{fill:none;stroke:var(--acc);stroke-width:1.5;opacity:0;
+    transform-box:fill-box;transform-origin:center;animation:ripple 3.9s ease-out infinite}
+  .ripple.d1{animation-delay:1.3s}
+  .ripple.d2{animation-delay:2.6s}
+  .ripple.paused{animation-play-state:paused;opacity:0}
+  @keyframes ripple{0%{transform:scale(.12);opacity:.55}65%{opacity:.13}100%{transform:scale(1);opacity:0}}
   .blip{cursor:pointer;transition:filter .15s}
   .blip:hover{filter:brightness(1.35)}
   .blip circle.core{transition:r .2s}
@@ -140,14 +143,13 @@ function draw() {
   svg.append(el("line", { x1: C - R, y1: C, x2: C + R, y2: C, class: "cross" }));
   svg.append(el("line", { x1: C, y1: C - R, x2: C, y2: C + R, class: "cross" }));
 
-  // sweep
-  const g = el("g", { class: "sweep" + (state.search ? "" : " paused") });
-  const wedge = el("path", {
-    d: `M ${C} ${C} L ${C + R} ${C} A ${R} ${R} 0 0 1 ${C + R * Math.cos(-0.9)} ${C + R * Math.sin(-0.9)} Z`,
-    fill: "url(#sweepGrad)", opacity: "0.9"
+  // expanding rings from the center
+  [0, 1, 2].forEach((i) => {
+    svg.append(el("circle", {
+      cx: C, cy: C, r: R,
+      class: "ripple" + (i ? " d" + i : "") + (state.search ? "" : " paused")
+    }));
   });
-  g.append(wedge);
-  svg.append(g);
 
   // self
   svg.append(el("circle", { cx: C, cy: C, r: 26, fill: "rgba(94,234,212,.10)" }));

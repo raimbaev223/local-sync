@@ -34,9 +34,12 @@ const CSS = `
 .ls-ring{fill:none;stroke:var(--ui-stroke-secondary);stroke-width:1}
 .ls-ring.dash{stroke-dasharray:2 6;opacity:.7}
 .ls-cross{stroke:var(--ui-stroke-secondary);stroke-width:1;opacity:.45}
-.ls-sweep{transform-origin:50% 50%;animation:ls-spin 4.2s linear infinite}
-.ls-sweep.paused{animation-play-state:paused}
-@keyframes ls-spin{to{transform:rotate(360deg)}}
+.ls-ripple{fill:none;stroke:var(--ui-accent);stroke-width:1.5;opacity:0;
+  transform-box:fill-box;transform-origin:center;animation:ls-ripple 3.9s ease-out infinite}
+.ls-ripple.d1{animation-delay:1.3s}
+.ls-ripple.d2{animation-delay:2.6s}
+.ls-ripple.paused{animation-play-state:paused;opacity:0}
+@keyframes ls-ripple{0%{transform:scale(.12);opacity:.55}65%{opacity:.13}100%{transform:scale(1);opacity:0}}
 .ls-blip{cursor:pointer}
 .ls-blip:hover .ls-core{filter:brightness(1.4)}
 .ls-label{fill:var(--ui-text-tertiary);font-size:10.5px}
@@ -122,7 +125,6 @@ function Radar({ peers, search, onSelect }) {
   const rings = [0.42, 0.68, 1].map((k, index) =>
     jsx('circle', { cx: C, cy: C, r: R * k, className: 'ls-ring' + (index === 0 ? ' dash' : '') }, `ring-${k}`)
   )
-  const wedge = `M ${C} ${C} L ${C + R} ${C} A ${R} ${R} 0 0 1 ${C + R * Math.cos(-0.9)} ${C + R * Math.sin(-0.9)} Z`
   const blips = peers.map((peer) => {
     const angle = (angleFor(peer.name) * Math.PI) / 180
     const radius = peer.paired ? 92 : 145
@@ -162,10 +164,18 @@ function Radar({ peers, search, onSelect }) {
         ...rings,
         jsx('line', { x1: C - R, y1: C, x2: C + R, y2: C, className: 'ls-cross' }),
         jsx('line', { x1: C, y1: C - R, x2: C, y2: C + R, className: 'ls-cross' }),
-        jsx('g', {
-          className: 'ls-sweep' + (search ? '' : ' paused'),
-          children: jsx('path', { d: wedge, fill: 'var(--ui-accent)', opacity: 0.16 })
-        }),
+        [0, 1, 2].map((index) =>
+          jsx(
+            'circle',
+            {
+              cx: C,
+              cy: C,
+              r: R,
+              className: 'ls-ripple' + (index ? ` d${index}` : '') + (search ? '' : ' paused')
+            },
+            `ripple-${index}`
+          )
+        ),
         jsx('circle', { cx: C, cy: C, r: 24, fill: 'var(--ui-accent)', opacity: 0.1 }),
         jsx('circle', { cx: C, cy: C, r: 5, fill: 'var(--ui-accent)' }),
         jsx('text', { x: C, y: C + 42, textAnchor: 'middle', className: 'ls-self', children: 'этот компьютер' }),
