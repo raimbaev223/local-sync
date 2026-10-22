@@ -90,7 +90,8 @@ function makeApi(rest) {
     sync: (peer) => call('/sync', { peer }),
     sessions: (peer) => call('/sessions', { peer }),
     profiles: (peer) => call('/peer-profiles', { peer }),
-    importProfile: (peer, profile) => call('/import-profile', { peer, profile, overwrite: false })
+    importProfile: (peer, profile, mode, localName) =>
+      call('/import-profile', { peer, profile, mode, local_name: localName })
   }
 }
 
@@ -390,11 +391,31 @@ function View({ api }) {
                                   })
                                 ]
                               }),
-                              jsx('button', {
-                                className: 'ls-act primary',
-                                disabled: busy,
-                                onClick: () => act(() => api.importProfile(profiles.peer, item.name), `импорт ${item.name}`),
-                                children: 'Импортировать'
+                              jsxs('div', {
+                                className: 'ls-actions',
+                                children: [
+                                  jsx('button', {
+                                    className: 'ls-act primary',
+                                    disabled: busy,
+                                    title: 'добавить недостающие файлы, локальные не трогать',
+                                    onClick: () => act(() => api.importProfile(profiles.peer, item.name, 'merge'), `мерж ${item.name}`),
+                                    children: 'Мерж'
+                                  }),
+                                  jsx('button', {
+                                    className: 'ls-act',
+                                    disabled: busy,
+                                    title: 'заменить локальные файлы версией пира (с бэкапом)',
+                                    onClick: () => act(() => api.importProfile(profiles.peer, item.name, 'rebase'), `ребейс ${item.name}`),
+                                    children: 'Ребейс'
+                                  }),
+                                  jsx('button', {
+                                    className: 'ls-act',
+                                    disabled: busy,
+                                    title: 'импортировать под новым именем',
+                                    onClick: () => act(() => api.importProfile(profiles.peer, item.name, 'rename'), `копия ${item.name}`),
+                                    children: 'Копия'
+                                  })
+                                ]
                               })
                             ]
                           },

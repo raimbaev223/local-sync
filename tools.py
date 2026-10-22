@@ -135,7 +135,7 @@ def profiles(args: dict) -> str:
 def import_profile(args: dict) -> str:
     def go(a: dict) -> dict:
         return _call("import_profile", peer=a["peer"], profile=a["profile"],
-                     local_name=a.get("local_name"), overwrite=bool(a.get("overwrite")))
+                     local_name=a.get("local_name"), mode=a.get("mode") or "merge")
 
     return _run(go, args)
 

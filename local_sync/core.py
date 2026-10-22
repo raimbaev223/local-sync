@@ -747,7 +747,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             elif op == "import_profile":
                 result = self.daemon.import_profile(
                     self.daemon.resolve(args["peer"], wait=3.0),
-                    args["profile"], args.get("local_name"), bool(args.get("overwrite")))
+                    args["profile"], args.get("local_name"), args.get("mode") or "merge")
             elif op == "sessions":
                 result = self.daemon.copy_sessions(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "plan":
@@ -1117,30 +1117,57 @@ class SyncDaemon:
         return answer
 
     def import_profile(self, peer_id: str, remote_profile: str, local_name: str | None = None,
-                       overwrite: bool = False) -> dict:
-        """Copy a whole profile from the peer, creating it here under the same name."""
+                       mode: str = "merge") -> dict:
+        """Copy a profile from the peer.
+
+        ``mode`` decides what happens when the name already exists locally:
+        ``merge`` keeps local files and only fills the gaps, ``rebase`` replaces
+        local files with the peer's (after a backup), ``rename`` imports into a
+        new name instead.
+        """
+        if mode not in ("merge", "rebase", "rename"):
+            raise AuthError(f"неизвестный режим импорта: {mode}")
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
         name = (local_name or remote_profile).strip()
         if not name or "/" in name or name.startswith("."):
             raise AuthError("плохое имя профиля")
         root = profile_root(self.store)
-        dest = root if name == "default" else root / "profiles" / name
-        if (name == self.store.config.get("profile")
-                or dest.resolve() == Path(self.store.config["profile_dir"]).expanduser().resolve()):
+        active = Path(self.store.config["profile_dir"]).expanduser().resolve()
+
+        def destination(profile_name: str) -> Path:
+            return root if profile_name == "default" else root / "profiles" / profile_name
+
+        dest = destination(name)
+        if dest.exists() and mode == "rename":
+            name = (local_name or f"{remote_profile}-peer").strip()
+            dest = destination(name)
+            if dest.exists():
+                raise AuthError(f"профиль {name} тоже уже есть — укажи другое имя")
+        if name == self.store.config.get("profile") or dest.resolve() == active:
             raise AuthError("это активный профиль — выбери другое имя")
-        if dest.exists() and not overwrite:
-            raise AuthError(f"профиль {name} уже есть на этой машине")
+
+        existing = dest.exists()
+        backup_dir = None
+        if existing and mode == "rebase":
+            backup_dir = (self.store.home / "backups" / time.strftime("%Y%m%d-%H%M%S")
+                          / "profiles" / name)
         files = client.manifest(profile=remote_profile)
-        created = skipped = 0
+        created = skipped = replaced = 0
         for rel in files:
             target = safe_target(dest, rel)
-            if target.exists() and not overwrite:
-                skipped += 1
-                continue
+            if target.exists():
+                if existing and mode == "merge":
+                    skipped += 1
+                    continue
+                if existing and mode == "rebase":
+                    atomic_write(backup_dir / rel, target.read_bytes())
+                    replaced += 1
             atomic_write(target, client.fetch(rel, profile=remote_profile))
             created += 1
-        log(f"imported profile {remote_profile} -> {name}: {created} files")
-        return {"profile": name, "path": str(dest), "files": created, "skipped": skipped}
+        log(f"imported profile {remote_profile} -> {name} ({mode}): {created} files, {skipped} kept")
+        return {"profile": name, "path": str(dest), "mode": mode, "files": created,
+                "skipped": skipped, "replaced": replaced,
+                "backup": str(backup_dir) if backup_dir else None}
 
     def copy_sessions(self, peer_id: str) -> dict:
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))

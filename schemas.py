@@ -127,7 +127,12 @@ IMPORT_PROFILE = {
             "peer": {"type": "string"},
             "profile": {"type": "string", "description": "Profile name on the peer"},
             "local_name": {"type": "string", "description": "Local directory name (defaults to the same name)"},
-            "overwrite": {"type": "boolean", "description": "Overwrite files in an existing profile dir"},
+            "mode": {
+                "type": "string",
+                "enum": ["merge", "rebase", "rename"],
+                "description": "When the profile name already exists: merge keeps local files and fills gaps, "
+                               "rebase replaces them with the peer's (backed up first), rename imports under a new name",
+            },
         },
         "required": ["peer", "profile"],
     },

@@ -284,8 +284,24 @@ class PairTest(unittest.TestCase):
         copied = Path(self.nodes["mac"].config["profile_dir"]) / "profiles" / "imported" / "skills/user-skill/SKILL.md"
         self.assertTrue(copied.exists())
 
-        with self.assertRaises(hs.AuthError):
-            self.a.import_profile(self.b_id, "default", "imported")
+        # merge into the existing copy: nothing new, nothing lost
+        merged = self.a.import_profile(self.b_id, "default", "imported", mode="merge")
+        self.assertEqual(merged["files"], 0)
+        self.assertGreaterEqual(merged["skipped"], 1)
+
+        # rebase: local edit is replaced by the peer's version, old one backed up
+        local_skill = copied
+        local_skill.write_text("---\nname: user-skill\n---\nlocal edit\n")
+        rebased = self.a.import_profile(self.b_id, "default", "imported", mode="rebase")
+        self.assertGreaterEqual(rebased["replaced"], 1)
+        self.assertIn("from pc", local_skill.read_text())
+        self.assertTrue(Path(rebased["backup"]).exists())
+
+        # rename: the taken name is left alone, a copy appears beside it
+        copied2 = self.a.import_profile(self.b_id, "default", None, mode="rename")
+        self.assertEqual(copied2["profile"], "default-peer")
+        self.assertTrue((Path(copied2["path"]) / "skills/user-skill/SKILL.md").exists())
+
         with self.assertRaises(hs.AuthError):
             self.a.import_profile(self.b_id, "default", "algo")  # active profile is off limits
 

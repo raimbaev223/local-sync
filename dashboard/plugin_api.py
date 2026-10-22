@@ -141,7 +141,7 @@ def peer_profiles(body: dict) -> dict:
 @router.post("/import-profile")
 def import_profile(body: dict) -> dict:
     return _ctl("import_profile", peer=body.get("peer", ""), profile=body.get("profile", ""),
-                local_name=body.get("local_name"), overwrite=bool(body.get("overwrite")))
+                local_name=body.get("local_name"), mode=body.get("mode") or "merge")
 
 
 @router.post("/sessions")
