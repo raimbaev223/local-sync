@@ -87,4 +87,18 @@ APPLY = {
     },
 }
 
-TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY]
+SESSIONS = {
+    "name": "local_sync_sessions",
+    "description": (
+        "Copy the peer's chat history into this profile: sessions and messages are inserted "
+        "only when missing, nothing local is overwritten. Use when the user asks to move or "
+        "mirror their conversations from the other machine."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"peer": {"type": "string", "description": "Paired peer name"}},
+        "required": ["peer"],
+    },
+}
+
+TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS]

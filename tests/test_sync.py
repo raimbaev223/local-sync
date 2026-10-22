@@ -40,6 +40,7 @@ class PairTest(unittest.TestCase):
                 "roots": ["skills", "memories", "SOUL.md"],
                 "broadcast": [],
                 "beacon_interval": 0.2,
+                "same_host": True,      # tests run two peers on one loopback host
             })
             store.save()
             self.nodes[name] = store
@@ -220,6 +221,53 @@ class PairTest(unittest.TestCase):
         with self.assertRaises(hs.AuthError):
             self.b.pair_psk_accept(self.a_id, "beta-beta")
         self.assertNotIn(self.a_id, self.nodes["pc"].state["peers"])
+
+    def test_pair_auto_generates_code_for_the_other_side(self):
+        begun = self.a.pair_auto(self.b_id)
+        self.assertTrue(begun["generated"])
+        self.assertEqual(len(begun["code"]), 6)
+        accepted = self.b.pair_psk_accept(self.a_id, begun["code"])
+        self.assertEqual(accepted["peer"], "mac")
+        self.assertEqual(self.nodes["mac"].state["peers"][self.b_id]["key"],
+                         self.nodes["pc"].state["peers"][self.a_id]["key"])
+
+    def test_sessions_copy_is_insert_only(self):
+        import sqlite3
+        self.pair()
+        schema = """
+            CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, started_at REAL);
+            CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,
+                                   role TEXT, content TEXT, timestamp REAL, message_uid TEXT);
+        """
+        for name in ("mac", "pc"):
+            db = Path(self.nodes[name].config["profile_dir"]) / "state.db"
+            con = sqlite3.connect(db)
+            con.executescript(schema)
+            con.commit()
+            con.close()
+        # the peer has a chat and one local has its own
+        pc_db = sqlite3.connect(Path(self.nodes["pc"].config["profile_dir"]) / "state.db")
+        pc_db.execute("INSERT INTO sessions VALUES ('sess-pc', 'cli', 1.0)")
+        pc_db.executemany("INSERT INTO messages (session_id, role, content, timestamp, message_uid) VALUES (?,?,?,?,?)",
+                          [("sess-pc", "user", "hi from pc", 1.0, "u1"),
+                           ("sess-pc", "assistant", "hello", 1.1, "u2")])
+        pc_db.commit(); pc_db.close()
+        mac_db_path = Path(self.nodes["mac"].config["profile_dir"]) / "state.db"
+        mac_db = sqlite3.connect(mac_db_path)
+        mac_db.execute("INSERT INTO sessions VALUES ('sess-mac', 'cli', 2.0)")
+        mac_db.commit(); mac_db.close()
+
+        result = self.a.copy_sessions(self.b_id)
+        self.assertEqual((result["sessions"], result["messages"]), (1, 2))
+
+        check = sqlite3.connect(mac_db_path)
+        ids = {row[0] for row in check.execute("SELECT id FROM sessions")}
+        self.assertEqual(ids, {"sess-mac", "sess-pc"})
+        self.assertEqual(check.execute("SELECT count(*) FROM messages").fetchone()[0], 2)
+        check.close()
+
+        # second pass copies nothing and never duplicates
+        self.assertEqual(self.a.copy_sessions(self.b_id)["messages"], 0)
 
     def test_search_toggle(self):
         self.assertTrue(self.a.search_enabled())

@@ -22,6 +22,7 @@ provides_tools:
   - local_sync_accept
   - local_sync_plan
   - local_sync_apply
+  - local_sync_sessions
 
 config_schema:
   sync_interval:

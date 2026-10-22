@@ -107,7 +107,8 @@ def search(body: dict) -> dict:
 def pair(body: dict) -> dict:
     if body.get("password"):
         return _ctl("pair_psk_begin", peer=body.get("peer", ""), password=body["password"])
-    return _ctl("pair_begin", peer=body.get("peer", ""))
+    # The initiator gets a generated code and reads it out; the peer types it in.
+    return _ctl("pair_auto", peer=body.get("peer", ""))
 
 
 @router.post("/accept")
@@ -130,3 +131,8 @@ def plan(body: dict) -> dict:
 @router.post("/sync")
 def sync(body: dict) -> dict:
     return _ctl("sync", peer=body.get("peer", ""))
+
+
+@router.post("/sessions")
+def sessions(body: dict) -> dict:
+    return _ctl("sessions", peer=body.get("peer", ""))

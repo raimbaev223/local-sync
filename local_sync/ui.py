@@ -257,6 +257,7 @@ class UiHandler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "bad json"})
         routes = {
             "/api/search": ("search", lambda p: {"enabled": bool(p.get("enabled"))}),
+            "/api/sessions": ("sessions", lambda p: {"peer": p.get("peer", "")}),
             "/api/pair": ("pair_psk_begin", lambda p: {"peer": p.get("peer", ""), "password": p.get("password", "")}),
             "/api/accept": ("pair_psk_accept", lambda p: {"peer": p.get("peer", ""), "password": p.get("password", "")}),
             "/api/deny": ("deny", lambda p: {"pair_id": p.get("pair_id", "")}),
@@ -268,8 +269,11 @@ class UiHandler(BaseHTTPRequestHandler):
             return self._json(404, {"ok": False, "error": "unknown route"})
         op, shape = route
         args = shape(payload)
+        if path == "/api/pair" and not payload.get("password"):
+            op = "pair_auto"     # code generated here, typed on the other machine
+            args = {"peer": args["peer"]}
         if path == "/api/accept" and not args.get("password"):
-            op = "pair_accept"  # code-based confirmation
+            op = "pair_accept"   # legacy 6-digit code confirmation
             args = {"peer": args["peer"], "code": payload.get("code", "")}
         return self._call(op, args)
 

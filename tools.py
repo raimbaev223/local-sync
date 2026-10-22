@@ -84,21 +84,14 @@ def peers(args: dict) -> str:
 
 def pair(args: dict) -> str:
     def go(a: dict) -> dict:
-        op = "pair_psk_begin" if a.get("password") else "pair_begin"
-        kwargs = {"peer": a["peer"]}
-        if a.get("password"):
-            kwargs["password"] = a["password"]
-        result = _call(op, **kwargs)
-        if a.get("password"):
-            result["next"] = (
-                "On the other machine enter the SAME password: local_sync_accept(peer=..., password=...) "
-                f"or `local-sync ui`. Codes must match: {result.get('code')}"
-            )
-        else:
-            result["next"] = (
-                f"Confirm the code on the other machine: local_sync_accept(peer=..., code={result['code']}) "
-                "or `local-sync accept <this-machine> --code " + result["code"] + "`."
-            )
+        if a.get("password"):           # shared password both sides agree on
+            result = _call("pair_psk_begin", peer=a["peer"], password=a["password"])
+            result["next"] = ("Enter the same password on the other machine: "
+                              "local_sync_accept(peer=..., password=...)")
+        else:                           # code generated here, typed in there
+            result = _call("pair_auto", peer=a["peer"])
+            result["next"] = (f"Read this code to the other machine and confirm there: "
+                              f"local_sync_accept(peer=..., code={result['code']})")
         return result
 
     return _run(go, args)
@@ -106,9 +99,10 @@ def pair(args: dict) -> str:
 
 def accept(args: dict) -> str:
     def go(a: dict) -> dict:
-        if a.get("password"):
-            return _call("pair_psk_accept", peer=a["peer"], password=a["password"])
-        return _call("pair_accept", peer=a["peer"], code=a.get("code"))
+        secret = a.get("password") or a.get("code")
+        if not secret:
+            raise RuntimeError("нужен код с другой машины")
+        return _call("pair_psk_accept", peer=a["peer"], password=secret)
 
     return _run(go, args)
 
@@ -129,6 +123,11 @@ def apply(args: dict) -> str:
     return _run(lambda a: _call("sync", peer=a["peer"]), args)
 
 
+def sessions(args: dict) -> str:
+    """Pull the peer's chat history into this profile (insert-only)."""
+    return _run(lambda a: _call("sessions", peer=a["peer"]), args)
+
+
 HANDLERS = {
     "local_sync_status": status,
     "local_sync_peers": peers,
@@ -136,4 +135,5 @@ HANDLERS = {
     "local_sync_accept": accept,
     "local_sync_plan": plan,
     "local_sync_apply": apply,
+    "local_sync_sessions": sessions,
 }

@@ -22,8 +22,10 @@ import json
 import os
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -215,6 +217,7 @@ class Store:
     def me(self) -> dict:
         c = self.config
         return {"id": c["id"], "name": c["name"], "profile": c["profile"],
+                "machine": socket.gethostname().lower(),
                 "api_port": c["api_port"], "beacon_port": c["beacon_port"]}
 
     def peer(self, peer_id: str) -> dict | None:
@@ -312,6 +315,9 @@ class PeerClient:
     def push(self, rel: str, data: bytes) -> None:
         self._request("PUT", "/file?path=" + urllib.parse.quote(rel), body=data)
 
+    def sessions_snapshot(self) -> bytes:
+        return self._request("GET", "/sessions")
+
 
 def find_addr(daemon: "SyncDaemon", peer_id: str) -> str:
     with daemon.lock:
@@ -408,6 +414,107 @@ def apply_plan(store: Store, daemon: "SyncDaemon", peer_id: str, actions: list[d
     return {"stats": stats, "conflicts": conflicts}
 
 
+# ------------------------------------------------------------------------- sessions
+
+
+def sessions_db_path(store: Store) -> Path:
+    return Path(store.config["profile_dir"]).expanduser() / "state.db"
+
+
+def snapshot_sessions(db_path: Path) -> bytes:
+    """Consistent copy of a live WAL database without stopping the agent."""
+    if not db_path.exists():
+        raise AuthError("state.db not found")
+    source = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=15)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp.close()
+    try:
+        target = sqlite3.connect(tmp.name)
+        with target:
+            source.backup(target)
+        target.close()
+        return Path(tmp.name).read_bytes()
+    finally:
+        source.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    try:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+    except sqlite3.Error:
+        return []
+
+
+def import_sessions(db_path: Path, payload: bytes, max_bytes: int = 200 * 1024 * 1024) -> dict:
+    """Merge another machine's sessions into this profile: insert-only, no updates."""
+    if len(payload) > max_bytes:
+        raise AuthError(f"snapshot too large: {len(payload)} bytes")
+    if not db_path.exists():
+        raise AuthError("локальной state.db нет — Hermes ещё не создал её в этом профиле")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as handle:
+        handle.write(payload)
+        snapshot_path = handle.name
+    try:
+        src = sqlite3.connect(f"file:{snapshot_path}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(db_path), timeout=15)
+        dst.execute("PRAGMA busy_timeout=15000")
+        src_sessions = _table_columns(src, "sessions")
+        dst_sessions = _table_columns(dst, "sessions")
+        src_messages = _table_columns(src, "messages")
+        dst_messages = _table_columns(dst, "messages")
+        if not src_sessions or not src_messages or not dst_sessions or not dst_messages:
+            raise AuthError("state.db не похожа на хранилище сессий Hermes")
+        s_cols = [c for c in src_sessions if c in dst_sessions]
+        m_cols = [c for c in src_messages if c in dst_messages]
+        known = {row[0] for row in dst.execute("SELECT id FROM sessions")}
+        existing = {(row[0], row[1]) for row in dst.execute(
+            "SELECT session_id, coalesce(message_uid, role || ':' || timestamp) FROM messages")}
+        new_sessions = [dict(zip(s_cols, row)) for row in
+                        src.execute(f"SELECT {', '.join(s_cols)} FROM sessions")
+                        if row[s_cols.index("id")] not in known]
+        new_messages = []
+        for row in src.execute(f"SELECT {', '.join(m_cols)} FROM messages ORDER BY timestamp, id"):
+            record = dict(zip(m_cols, row))
+            key = (record.get("session_id"),
+                   record.get("message_uid") or f"{record.get('role')}:{record.get('timestamp')}")
+            if key in existing:
+                continue
+            existing.add(key)
+            record.pop("id", None)          # local autoincrement decides its own ids
+            new_messages.append(record)
+        with dst:
+            if new_sessions:
+                placeholders = ", ".join("?" for _ in s_cols)
+                dst.executemany(
+                    f"INSERT OR IGNORE INTO sessions ({', '.join(s_cols)}) VALUES ({placeholders})",
+                    [tuple(item[c] for c in s_cols) for item in new_sessions])
+            if new_messages:
+                cols = list(new_messages[0])
+                placeholders = ", ".join("?" for _ in cols)
+                dst.executemany(
+                    f"INSERT INTO messages ({', '.join(cols)}) VALUES ({placeholders})",
+                    [tuple(item.get(c) for c in cols) for item in new_messages])
+        for table in ("messages_fts", "messages_fts_trigram"):
+            try:
+                dst.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
+            except sqlite3.Error:
+                pass
+        dst.commit()
+        dst.close()
+        src.close()
+        return {"sessions": len(new_sessions), "messages": len(new_messages),
+                "skipped_messages": sum(1 for _ in ())}
+    finally:
+        try:
+            os.unlink(snapshot_path)
+        except OSError:
+            pass
+
+
 # --------------------------------------------------------------------------- server
 
 
@@ -470,6 +577,12 @@ class ApiHandler(BaseHTTPRequestHandler):
         peer_id = self._auth("GET", self.path)
         if not peer_id:
             return self._json(401, {"error": "unauthorized"})
+        if path == "/sessions":
+            try:
+                payload = snapshot_sessions(sessions_db_path(self.store))
+            except AuthError as exc:
+                return self._json(404, {"error": str(exc)})
+            return self._raw(200, payload, "application/x-sqlite3")
         if path == "/manifest":
             return self._json(200, {"files": build_manifest(self.store), "profile": self.store.me["profile"]})
         if path == "/file":
@@ -550,12 +663,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if removed:
                     self.store.save()
                 result = {"denied": removed}
+            elif op == "pair_auto":
+                result = self.daemon.pair_auto(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "pair_psk_begin":
                 result = self.daemon.pair_psk_begin(self.daemon.resolve(args["peer"], wait=3.0),
                                                     args.get("password", ""))
             elif op == "pair_psk_accept":
                 result = self.daemon.pair_psk_accept(self.daemon.resolve(args["peer"], wait=3.0),
                                                      args.get("password", ""))
+            elif op == "sessions":
+                result = self.daemon.copy_sessions(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "plan":
                 peer_id = self.daemon.resolve(args["peer"], wait=3.0)
                 result = {"plan": make_plan(self.store, self.daemon, peer_id)}
@@ -686,6 +803,15 @@ class SyncDaemon:
     def __init__(self, store: Store, bind: str = "0.0.0.0", api_port: int | None = None,
                  beacon_port: int | None = None):
         self.store = store
+        # One daemon per state dir. A second one would beacon the same identity from
+        # the same host and make every peer see this machine twice.
+        import fcntl
+        self._lock_file = open(store.home / "daemon.lock", "a+")
+        try:
+            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            log("another local-sync daemon already runs for this state dir — exiting")
+            raise SystemExit(1)
         self.lock = threading.RLock()
         self.peers: dict[str, dict] = {}
         self.events: list[dict] = []
@@ -816,11 +942,19 @@ class SyncDaemon:
                 info = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            if info.get("service") != SERVICE or info.get("id") == self.store.me["id"]:
+            me = self.store.me
+            if info.get("service") != SERVICE or info.get("id") == me["id"]:
                 continue
+            if (not self.store.config.get("same_host")
+                    and (info.get("machine") or "").lower() == me["machine"]):
+                continue  # another local-sync on THIS host (second state dir / stale daemon)
             record = {"id": info["id"], "name": info.get("name", "?"), "profile": info.get("profile", "?"),
                       "api_port": int(info.get("api_port") or 0), "addr": addr[0], "last_seen": time.time()}
             with self.lock:
+                # one row per machine+profile: a re-installed peer may reappear under a new id
+                for known_id, known in list(self.peers.items()):
+                    if known_id != record["id"] and (known["name"], known["profile"]) == (record["name"], record["profile"]):
+                        del self.peers[known_id]
                 fresh = record["id"] not in self.peers
                 record["paired"] = record["id"] in self.store.state["peers"]
                 self.peers[record["id"]] = record
@@ -886,6 +1020,14 @@ class SyncDaemon:
         return {"peers": visible, "pending": pending}
 
     # discovery control (manual mode) --------------------------------------
+    def copy_sessions(self, peer_id: str) -> dict:
+        client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
+        payload = client.sessions_snapshot()
+        result = import_sessions(sessions_db_path(self.store), payload)
+        result["peer"] = self.peers[peer_id]["name"]
+        log(f"sessions from {result['peer']}: +{result['sessions']} chats, +{result['messages']} messages")
+        return result
+
     def set_search(self, enabled: bool) -> dict:
         self.store.config["search"] = bool(enabled)
         self.store.save()
@@ -917,6 +1059,13 @@ class SyncDaemon:
                                      "key": key, "nonce": nonce, "created": time.time()}
         return {"pair_id": pair_id, "code": psk_code(key), "peer": info["name"],
                 "status": "waiting for the other side to enter the same password"}
+
+    def pair_auto(self, peer_id: str) -> dict:
+        """Initiator side: generate the code here, the other machine types it in."""
+        code = f"{secrets.randbelow(900_000) + 100_000:06d}"
+        result = self.pair_psk_begin(peer_id, code)
+        return {**result, "code": code, "sas": result.get("code"), "generated": True,
+                "hint": f"введи код {code} на {result.get('peer', 'другой машине')}"}
 
     def pair_psk_accept(self, peer_id: str, password: str) -> dict:
         """Responder side: confirm with the shared password, then verify the ack."""

@@ -46,8 +46,10 @@ function makeApi(rest) {
     status: () => call('/status'),
     peers: () => call('/peers'),
     search: (enabled = true) => call('/search', { enabled }),
-    pair: (peer, password) => call('/pair', { peer, password }),
-    accept: (peer, password, code) => call('/accept', { peer, password, code }),
+    pair: (peer) => call('/pair', { peer }),
+    pairWithPassword: (peer, password) => call('/pair', { peer, password }),
+    accept: (peer, code) => call('/accept', { peer, password: code, code }),
+    sessions: (peer) => call('/sessions', { peer }),
     deny: (pairId) => call('/deny', { pair_id: pairId }),
     plan: (peer) => call('/plan', { peer }),
     sync: (peer) => call('/sync', { peer })
@@ -67,7 +69,8 @@ function Pane({ api }) {
   const [error, setError] = useState('')
   const [out, setOut] = useState('')
   const [busy, setBusy] = useState(false)
-  const [draft, setDraft] = useState({}) // peer name -> password being typed
+  const [draft, setDraft] = useState({}) // peer name -> code being typed
+  const [handoff, setHandoff] = useState(null) // {peer, code} generated here, typed there
 
   const refresh = useCallback(async () => {
     try {
@@ -140,6 +143,12 @@ function Pane({ api }) {
                     children: 'План'
                   }),
                   jsx('button', {
+                    style: btnStyle(false),
+                    disabled: busy,
+                    onClick: () => run(() => api.sessions(peer.name), `диалоги ${peer.name}`),
+                    children: 'Диалоги'
+                  }),
+                  jsx('button', {
                     style: btnStyle(true),
                     disabled: busy,
                     onClick: () => run(() => api.sync(peer.name), `синхронизация ${peer.name}`),
@@ -148,21 +157,33 @@ function Pane({ api }) {
                 ]
               })
             : jsxs('div', {
-                style: { display: 'flex', gap: '6px' },
+                style: { display: 'flex', flexDirection: 'column', gap: '6px' },
                 children: [
-                  jsx('input', {
-                    type: 'password',
-                    placeholder: 'пароль (можно цифры)',
-                    style: inputStyle,
-                    value: draft[peer.name] || '',
-                    onInput: (event) => setDraft({ ...draft, [peer.name]: event.target.value })
-                  }),
                   jsx('button', {
                     style: btnStyle(true),
                     disabled: busy,
-                    onClick: () => run(() => api.pair(peer.name, draft[peer.name] || ''), `подключение ${peer.name}`),
+                    onClick: async () => {
+                      setBusy(true)
+                      try {
+                        const result = await api.pair(peer.name)
+                        setHandoff({ peer: peer.name, code: result.code })
+                        setOut('код для подключения\n' + JSON.stringify(result, null, 2))
+                        haptic('tap')
+                      } catch (err) {
+                        setOut('подключение\n' + (err && err.message ? err.message : String(err)))
+                      } finally {
+                        setBusy(false)
+                        refresh()
+                      }
+                    },
                     children: 'Подключить'
-                  })
+                  }),
+                  handoff && handoff.peer === peer.name && handoff.code
+                    ? jsx('div', {
+                        style: { ...dimStyle, color: 'var(--ui-accent)' },
+                        children: `код ${handoff.code} — введи его на другой машине`
+                      })
+                    : null
                 ]
               })
         ]
@@ -190,8 +211,9 @@ function Pane({ api }) {
             children: [
               psk
                 ? jsx('input', {
-                    type: 'password',
-                    placeholder: 'тот же пароль',
+                    type: 'text',
+                    inputMode: 'numeric',
+                    placeholder: 'код с другой машины',
                     style: inputStyle,
                     value: draft[key] || '',
                     onInput: (event) => setDraft({ ...draft, [key]: event.target.value })
@@ -200,8 +222,8 @@ function Pane({ api }) {
               jsx('button', {
                 style: btnStyle(true),
                 disabled: busy,
-                onClick: () => run(() => api.accept(item.name, psk ? draft[key] || '' : '', item.code), `подтверждение ${item.name}`),
-                children: psk ? 'Подтвердить паролем' : 'Подтвердить'
+                onClick: () => run(() => api.accept(item.name, psk ? draft[key] || '' : item.code), `подтверждение ${item.name}`),
+                children: psk ? 'Подтвердить кодом' : 'Подтвердить'
               }),
               jsx('button', {
                 style: btnStyle(false),
@@ -224,7 +246,7 @@ function Pane({ api }) {
         children: [
           jsxs('div', {
             children: [
-              jsx('div', { style: { fontWeight: 600 }, children: 'local-sync' }),
+              jsx('div', { style: { fontWeight: 600 }, children: 'Синхрофазатрон' }),
               jsx('div', { style: dimStyle, children: header })
             ]
           }),
@@ -278,14 +300,14 @@ export default {
     ctx.register({
       id: 'page',
       area: 'routes',
-      title: 'local-sync',
+      title: 'Синхрофазатрон',
       data: { path: '/local-sync' },
       render: () => jsx(Pane, { api })
     })
     ctx.register({
       id: 'nav',
       area: 'sidebar.nav',
-      data: { path: '/local-sync', label: 'local-sync', codicon: 'radio-tower' }
+      data: { path: '/local-sync', label: 'Синхрофазатрон', codicon: 'radio-tower' }
     })
   }
 }

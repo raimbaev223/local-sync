@@ -35,6 +35,7 @@ out of scope — machine-specific or secret.
 | `local_sync_accept` | confirm an incoming request with that code |
 | `local_sync_plan` | dry-run: pull / push / conflict per file |
 | `local_sync_apply` | apply now |
+| `local_sync_sessions` | copy the peer's chat history here (insert-only) |
 
 Start with `local_sync_status`; if the peer is not listed, `local_sync_peers`.
 
