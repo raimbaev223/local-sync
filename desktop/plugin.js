@@ -50,6 +50,9 @@ function makeApi(rest) {
     pairWithPassword: (peer, password) => call('/pair', { peer, password }),
     accept: (peer, code) => call('/accept', { peer, password: code, code }),
     sessions: (peer) => call('/sessions', { peer }),
+    profiles: (peer) => call('/peer-profiles', { peer }),
+    importProfile: (peer, profile, localName, overwrite) =>
+      call('/import-profile', { peer, profile, local_name: localName, overwrite }),
     deny: (pairId) => call('/deny', { pair_id: pairId }),
     plan: (peer) => call('/plan', { peer }),
     sync: (peer) => call('/sync', { peer })
@@ -71,6 +74,7 @@ function Pane({ api }) {
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState({}) // peer name -> code being typed
   const [handoff, setHandoff] = useState(null) // {peer, code} generated here, typed there
+  const [peerProfiles, setPeerProfiles] = useState(null) // {peer, items}
 
   const refresh = useCallback(async () => {
     try {
@@ -141,6 +145,23 @@ function Pane({ api }) {
                     style: btnStyle(false),
                     onClick: () => run(() => api.plan(peer.name), `план ${peer.name}`),
                     children: 'План'
+                  }),
+                  jsx('button', {
+                    style: btnStyle(false),
+                    disabled: busy,
+                    onClick: async () => {
+                      setBusy(true)
+                      try {
+                        const table = await api.profiles(peer.name)
+                        setPeerProfiles({ peer: peer.name, items: table.profiles || [] })
+                        setOut('профили ' + peer.name + '\n' + JSON.stringify(table, null, 2))
+                      } catch (err) {
+                        setOut('профили\n' + (err && err.message ? err.message : String(err)))
+                      } finally {
+                        setBusy(false)
+                      }
+                    },
+                    children: 'Профили'
                   }),
                   jsx('button', {
                     style: btnStyle(false),
@@ -267,6 +288,36 @@ function Pane({ api }) {
       error ? jsx('div', { style: { color: 'var(--ui-red, #e06c75)', fontSize: '0.75rem' }, children: error }) : null,
       jsx(Section, { title: 'Устройства', children: peerRows.length ? peerRows : jsx('div', { style: dimStyle, children: 'никого не видно — включи поиск на обеих машинах' }) }),
       jsx(Section, { title: 'Запросы', children: pendingRows.length ? pendingRows : jsx('div', { style: dimStyle, children: 'нет' }) }),
+      peerProfiles
+        ? jsx(Section, {
+            title: `Профили ${peerProfiles.peer}`,
+            children: peerProfiles.items.length
+              ? peerProfiles.items.map((item) =>
+                  jsxs('div', {
+                    style: { ...cardStyle, display: 'flex', flexDirection: 'column', gap: '6px' },
+                    children: [
+                      jsxs('div', {
+                        style: rowStyle,
+                        children: [
+                          jsx('span', { children: jsx('b', { children: item.name }) }),
+                          jsx('span', {
+                            style: dimStyle,
+                            children: `скиллов ${item.skills} · память ${Math.round((item.memory_bytes || 0) / 1024)} КБ · сессии ${item.state_db_bytes ? Math.round(item.state_db_bytes / 1048576) + ' МБ' : '—'}`
+                          })
+                        ]
+                      }),
+                      jsx('button', {
+                        style: btnStyle(true),
+                        disabled: busy,
+                        onClick: () => run(() => api.importProfile(peerProfiles.peer, item.name, null, false), `импорт ${item.name}`),
+                        children: 'Импортировать'
+                      })
+                    ]
+                  })
+                )
+              : jsx('div', { style: dimStyle, children: 'на пире нет других профилей' })
+          })
+        : null,
       out
         ? jsx('pre', {
             style: {

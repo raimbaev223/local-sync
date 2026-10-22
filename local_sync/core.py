@@ -29,6 +29,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -233,8 +234,59 @@ class Store:
 # ----------------------------------------------------------------------- manifest
 
 
+def profile_root(store: Store) -> Path:
+    """The Hermes home that owns this profile (``~/.hermes`` or a profile's parent)."""
+    pd = Path(store.config["profile_dir"]).expanduser()
+    return pd.parent.parent if pd.parent.name == "profiles" else pd
+
+
+def known_profiles(store: Store) -> dict[str, Path]:
+    root = profile_root(store)
+    found: dict[str, Path] = {}
+    if (root / "profiles").is_dir():
+        for child in sorted((root / "profiles").iterdir()):
+            if child.is_dir():
+                found[child.name] = child
+    if (root / "config.yaml").exists() or (root / "skills").exists():
+        found.setdefault("default", root)
+    return found
+
+
+def resolve_profile_dir(store: Store, name: str | None) -> Path:
+    if not name or name == store.config.get("profile"):
+        return Path(store.config["profile_dir"]).expanduser()
+    profiles = known_profiles(store)
+    if name not in profiles:
+        raise AuthError(f"unknown profile: {name}")
+    return profiles[name]
+
+
+def profile_summary(path: Path) -> dict:
+    def count_files(sub: str, suffix: str = "") -> int:
+        target = path / sub
+        if target.is_file():
+            return 1
+        if not target.is_dir():
+            return 0
+        return sum(1 for item in target.rglob("*") if item.is_file() and item.name.endswith(suffix))
+
+    sessions = path / "state.db"
+    return {
+        "skills": count_files("skills", "SKILL.md"),
+        "memory_bytes": sum(item.stat().st_size for item in (path / "memories").glob("*.md")) if (path / "memories").is_dir() else 0,
+        "hooks": count_files("hooks"),
+        "cron": count_files("cron", ".json"),
+        "state_db_bytes": sessions.stat().st_size if sessions.exists() else 0,
+        "has_soul": (path / "SOUL.md").exists(),
+    }
+
+
 def build_manifest(store: Store) -> dict[str, dict]:
-    base = Path(store.config["profile_dir"]).expanduser()
+    return build_manifest_at(Path(store.config["profile_dir"]).expanduser(), store.config["roots"])
+
+
+def build_manifest_at(base: Path, roots: list[str]) -> dict[str, dict]:
+    base = Path(base).expanduser()
     bundled = bundled_skill_names(base)
     files: dict[str, dict] = {}
 
@@ -242,7 +294,7 @@ def build_manifest(store: Store) -> dict[str, dict]:
         st = path.stat()
         files[rel] = {"size": st.st_size, "mtime": round(st.st_mtime, 3), "sha256": sha_file(path)}
 
-    for root in store.config["roots"]:
+    for root in roots:
         target = base / root
         if target.is_file():
             include(target, root)
@@ -306,11 +358,16 @@ class PeerClient:
             detail = exc.read().decode(errors="replace")[:300]
             raise AuthError(f"{method} {path} -> {exc.code}: {detail}") from exc
 
-    def manifest(self) -> dict:
-        return json.loads(self._request("GET", "/manifest"))["files"]
+    def manifest(self, profile: str | None = None) -> dict:
+        suffix = f"?profile={urllib.parse.quote(profile)}" if profile else ""
+        return json.loads(self._request("GET", "/manifest" + suffix))["files"]
 
-    def fetch(self, rel: str) -> bytes:
-        return self._request("GET", "/file?path=" + urllib.parse.quote(rel))
+    def fetch(self, rel: str, profile: str | None = None) -> bytes:
+        query = "?path=" + urllib.parse.quote(rel) + (f"&profile={urllib.parse.quote(profile)}" if profile else "")
+        return self._request("GET", "/file" + query)
+
+    def profiles(self) -> dict:
+        return json.loads(self._request("GET", "/profiles"))
 
     def push(self, rel: str, data: bytes) -> None:
         self._request("PUT", "/file?path=" + urllib.parse.quote(rel), body=data)
@@ -577,6 +634,10 @@ class ApiHandler(BaseHTTPRequestHandler):
         peer_id = self._auth("GET", self.path)
         if not peer_id:
             return self._json(401, {"error": "unauthorized"})
+        if path == "/profiles":
+            profiles = [{"name": name, **profile_summary(directory)}
+                        for name, directory in known_profiles(self.store).items()]
+            return self._json(200, {"profiles": profiles, "default": self.store.config.get("profile")})
         if path == "/sessions":
             try:
                 payload = snapshot_sessions(sessions_db_path(self.store))
@@ -584,12 +645,22 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(404, {"error": str(exc)})
             return self._raw(200, payload, "application/x-sqlite3")
         if path == "/manifest":
-            return self._json(200, {"files": build_manifest(self.store), "profile": self.store.me["profile"]})
+            wanted = (parse_qs(parsed.query).get("profile") or [None])[0]
+            try:
+                directory = resolve_profile_dir(self.store, wanted)
+            except AuthError as exc:
+                return self._json(404, {"error": str(exc)})
+            return self._json(200, {"files": build_manifest_at(directory, self.store.config["roots"]),
+                                    "profile": wanted or self.store.me["profile"]})
         if path == "/file":
             rel = (parse_qs(parsed.query).get("path") or [""])[0]
             if not rel:
                 return self._json(400, {"error": "path required"})
-            base_dir = Path(self.store.config["profile_dir"]).expanduser()
+            wanted = (parse_qs(parsed.query).get("profile") or [None])[0]
+            try:
+                base_dir = resolve_profile_dir(self.store, wanted)
+            except AuthError as exc:
+                return self._json(404, {"error": str(exc)})
             try:
                 target = safe_target(base_dir, rel)
             except ValueError as exc:
@@ -671,6 +742,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             elif op == "pair_psk_accept":
                 result = self.daemon.pair_psk_accept(self.daemon.resolve(args["peer"], wait=3.0),
                                                      args.get("password", ""))
+            elif op == "peer_profiles":
+                result = self.daemon.peer_profiles(self.daemon.resolve(args["peer"], wait=3.0))
+            elif op == "import_profile":
+                result = self.daemon.import_profile(
+                    self.daemon.resolve(args["peer"], wait=3.0),
+                    args["profile"], args.get("local_name"), bool(args.get("overwrite")))
             elif op == "sessions":
                 result = self.daemon.copy_sessions(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "plan":
@@ -1033,6 +1110,38 @@ class SyncDaemon:
         return {"peers": visible, "pending": pending}
 
     # discovery control (manual mode) --------------------------------------
+    def peer_profiles(self, peer_id: str) -> dict:
+        client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
+        answer = client.profiles()
+        answer["peer"] = self.peers[peer_id]["name"]
+        return answer
+
+    def import_profile(self, peer_id: str, remote_profile: str, local_name: str | None = None,
+                       overwrite: bool = False) -> dict:
+        """Copy a whole profile from the peer, creating it here under the same name."""
+        client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
+        name = (local_name or remote_profile).strip()
+        if not name or "/" in name or name.startswith("."):
+            raise AuthError("плохое имя профиля")
+        root = profile_root(self.store)
+        dest = root if name == "default" else root / "profiles" / name
+        if (name == self.store.config.get("profile")
+                or dest.resolve() == Path(self.store.config["profile_dir"]).expanduser().resolve()):
+            raise AuthError("это активный профиль — выбери другое имя")
+        if dest.exists() and not overwrite:
+            raise AuthError(f"профиль {name} уже есть на этой машине")
+        files = client.manifest(profile=remote_profile)
+        created = skipped = 0
+        for rel in files:
+            target = safe_target(dest, rel)
+            if target.exists() and not overwrite:
+                skipped += 1
+                continue
+            atomic_write(target, client.fetch(rel, profile=remote_profile))
+            created += 1
+        log(f"imported profile {remote_profile} -> {name}: {created} files")
+        return {"profile": name, "path": str(dest), "files": created, "skipped": skipped}
+
     def copy_sessions(self, peer_id: str) -> dict:
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
         payload = client.sessions_snapshot()

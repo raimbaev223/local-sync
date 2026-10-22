@@ -101,4 +101,36 @@ SESSIONS = {
     },
 }
 
-TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS]
+PROFILES = {
+    "name": "local_sync_profiles",
+    "description": (
+        "List the Hermes profiles that exist on a paired machine, with skill/memory/session sizes. "
+        "Use when the user wants to see or bring over a profile from the other machine."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"peer": {"type": "string", "description": "Paired peer name"}},
+        "required": ["peer"],
+    },
+}
+
+IMPORT_PROFILE = {
+    "name": "local_sync_import_profile",
+    "description": (
+        "Copy a profile from the paired machine into a new local profile directory (skills, memories, "
+        "SOUL.md, hooks, cron, desktop-plugins). Refuses to touch the active profile or overwrite an "
+        "existing one unless overwrite=true."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "peer": {"type": "string"},
+            "profile": {"type": "string", "description": "Profile name on the peer"},
+            "local_name": {"type": "string", "description": "Local directory name (defaults to the same name)"},
+            "overwrite": {"type": "boolean", "description": "Overwrite files in an existing profile dir"},
+        },
+        "required": ["peer", "profile"],
+    },
+}
+
+TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS, PROFILES, IMPORT_PROFILE]

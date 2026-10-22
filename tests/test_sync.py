@@ -269,6 +269,26 @@ class PairTest(unittest.TestCase):
         # second pass copies nothing and never duplicates
         self.assertEqual(self.a.copy_sessions(self.b_id)["messages"], 0)
 
+    def test_peer_profiles_and_import(self):
+        self.pair()
+        skill = Path(self.nodes["pc"].config["profile_dir"]) / "skills/user-skill/SKILL.md"
+        skill.write_text("---\nname: user-skill\n---\nfrom pc\n")
+        listed = self.a.peer_profiles(self.b_id)
+        names = [item["name"] for item in listed["profiles"]]
+        self.assertIn("default", names)
+        default = next(item for item in listed["profiles"] if item["name"] == "default")
+        self.assertGreaterEqual(default["skills"], 1)
+
+        result = self.a.import_profile(self.b_id, "default", "imported")
+        self.assertGreaterEqual(result["files"], 1)
+        copied = Path(self.nodes["mac"].config["profile_dir"]) / "profiles" / "imported" / "skills/user-skill/SKILL.md"
+        self.assertTrue(copied.exists())
+
+        with self.assertRaises(hs.AuthError):
+            self.a.import_profile(self.b_id, "default", "imported")
+        with self.assertRaises(hs.AuthError):
+            self.a.import_profile(self.b_id, "default", "algo")  # active profile is off limits
+
     def test_search_toggle(self):
         self.assertTrue(self.a.search_enabled())
         self.a.set_search(False)

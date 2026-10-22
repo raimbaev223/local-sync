@@ -128,6 +128,18 @@ def sessions(args: dict) -> str:
     return _run(lambda a: _call("sessions", peer=a["peer"]), args)
 
 
+def profiles(args: dict) -> str:
+    return _run(lambda a: _call("peer_profiles", peer=a["peer"]), args)
+
+
+def import_profile(args: dict) -> str:
+    def go(a: dict) -> dict:
+        return _call("import_profile", peer=a["peer"], profile=a["profile"],
+                     local_name=a.get("local_name"), overwrite=bool(a.get("overwrite")))
+
+    return _run(go, args)
+
+
 HANDLERS = {
     "local_sync_status": status,
     "local_sync_peers": peers,
@@ -136,4 +148,6 @@ HANDLERS = {
     "local_sync_plan": plan,
     "local_sync_apply": apply,
     "local_sync_sessions": sessions,
+    "local_sync_profiles": profiles,
+    "local_sync_import_profile": import_profile,
 }

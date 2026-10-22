@@ -23,6 +23,8 @@ provides_tools:
   - local_sync_plan
   - local_sync_apply
   - local_sync_sessions
+  - local_sync_profiles
+  - local_sync_import_profile
 
 config_schema:
   sync_interval:

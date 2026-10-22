@@ -133,6 +133,17 @@ def sync(body: dict) -> dict:
     return _ctl("sync", peer=body.get("peer", ""))
 
 
+@router.post("/peer-profiles")
+def peer_profiles(body: dict) -> dict:
+    return _ctl("peer_profiles", peer=body.get("peer", ""))
+
+
+@router.post("/import-profile")
+def import_profile(body: dict) -> dict:
+    return _ctl("import_profile", peer=body.get("peer", ""), profile=body.get("profile", ""),
+                local_name=body.get("local_name"), overwrite=bool(body.get("overwrite")))
+
+
 @router.post("/sessions")
 def sessions(body: dict) -> dict:
     return _ctl("sessions", peer=body.get("peer", ""))
