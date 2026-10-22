@@ -91,6 +91,10 @@ function makeApi(rest) {
   const call = async (path, body) => {
     const answer = await rest(path, body === undefined ? {} : { method: 'POST', body })
     if (answer && answer.ok === false) throw new Error(answer.error || 'ошибка')
+    // 404/405 here means the gateway still serves an older plugin_api.py
+    if (answer && typeof answer === 'object' && (answer.status === 404 || answer.status === 405)) {
+      throw new Error(`роут ${path} не смонтирован — гейтвей работает со старой копией плагина`)
+    }
     return answer && Object.prototype.hasOwnProperty.call(answer, 'result') ? answer.result : answer
   }
   return {
