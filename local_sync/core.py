@@ -949,8 +949,21 @@ class SyncDaemon:
                     and (info.get("machine") or "").lower() == me["machine"]):
                 continue  # another local-sync on THIS host (second state dir / stale daemon)
             record = {"id": info["id"], "name": info.get("name", "?"), "profile": info.get("profile", "?"),
-                      "api_port": int(info.get("api_port") or 0), "addr": addr[0], "last_seen": time.time()}
+                      "machine": info.get("machine", ""),
+                      "api_port": int(info.get("api_port") or 0), "beacon_port": int(info.get("beacon_port") or 0),
+                      "addr": addr[0], "last_seen": time.time()}
+            # A paired peer whose daemon restarted with a fresh state dir comes back
+            # under a new id. Move the pair key over instead of losing the pair.
             with self.lock:
+                for pid, known in list(self.store.state["peers"].items()):
+                    if pid != record["id"] and (known.get("name"), known.get("profile")) == (record["name"], record["profile"]):
+                        migrated = {**known, "addr": record["addr"], "api_port": record["api_port"],
+                                    "beacon_port": record["beacon_port"] or known.get("beacon_port")}
+                        self.store.state["peers"][record["id"]] = migrated
+                        del self.store.state["peers"][pid]
+                        self.store.save()
+                        log(f"peer {record['name']} came back as a new instance — pair moved to {record['id'][:8]}")
+                        break
                 # one row per machine+profile: a re-installed peer may reappear under a new id
                 for known_id, known in list(self.peers.items()):
                     if known_id != record["id"] and (known["name"], known["profile"]) == (record["name"], record["profile"]):
