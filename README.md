@@ -1,126 +1,130 @@
 # local-sync
 
-Синхронизация профилей Hermes между машинами в локальной сети. Два демона находят
-друг друга UDP-биконом, знакомятся по 6-значному коду и дальше возят файлы по HTTP
-с HMAC-подписью. Без облака, без git, без сторонних зависимостей — только stdlib
-Python 3.9+.
+Hermes-плагин: синхронизация профиля между машинами в локальной сети. Устройства
+находят друг друга UDP-биконом, знакомятся по 6-значному коду, дальше возят файлы
+по HTTP с HMAC-подписью и трёхточечным merge. Без облака, без git, без сторонних
+зависимостей — только stdlib Python 3.9+.
+
+```
+local-sync/
+├── plugin.yaml          # манифест: 6 tools, config_schema
+├── __init__.py          # register(ctx): tools + вложенный скилл
+├── schemas.py           # схемы инструментов для модели
+├── tools.py             # обработчики: JSON-строка, автозапуск демона, прокси в /ctl
+├── local_sync/          # движок
+│   ├── core.py          # discovery, pairing, manifest, план, apply, HTTP, CLI
+│   └── __main__.py      # python -m local_sync run
+├── bin/local-sync       # CLI: run, peers, pair, accept, plan, sync, mcp
+├── skills/local-sync/   # вложенный скилл: когда и как пользоваться
+├── deploy/              # systemd --user unit + launchd plist
+└── tests/               # 12 тестов на loopback
+```
 
 ## Что синхронизируется
 
 | Слой | Путь | Да |
 |---|---|---|
-| Свои скиллы | `skills/**` (кроме bundled из `.bundled_manifest`) | ✅ |
+| Свои скиллы | `skills/**` (bundled отсекаются по `.bundled_manifest`) | ✅ |
 | Память | `memories/*.md` — union-merge по секциям `§` | ✅ |
 | Душа/правила | `SOUL.md` | ✅ |
 | Хуки | `hooks/**` | ✅ |
 | Desktop-плагины | `desktop-plugins/**` | ✅ |
-| Cron-определения | `cron/**` (без `executions.db`) | ✅ |
-| `config.yaml` | — | ❌ машиноспецифичен, синкать ключи вручную |
-| `.env`, `auth.json` | — | ❌ секреты остаются на машине |
-| `state.db`, сессии | — | ❌ пока нет (см. Roadmap) |
+| Cron | `cron/**` (без `executions.db`) | ✅ |
+| `config.yaml` | — | ❌ машиноспецифичен |
+| `.env`, `auth.json` | — | ❌ секреты |
+| `state.db`, сессии | — | ❌ пока нет |
 | `cache/`, `logs/`, `backups/` | — | ❌ |
 
-## Установка (обе машины)
+## Установка плагина
 
 ```bash
-git clone <this repo> ~/algo/local-sync     # или scp -r
-chmod +x ~/algo/local-sync/local-sync
-~/algo/local-sync/local-sync init          # создаст ~/.local-sync/config.json
+hermes plugins install file:///Users/erkin/algo/local-sync --ref <40-hex-sha>
+hermes plugins enable local-sync
+hermes gateway restart          # подхватится в новой сессии
 ```
 
-`config.json` можно поправить: `name`, `profile`, `profile_dir`, `roots`,
-`sync_interval` (сек, по умолчанию 300), `notify`, `auto_sync`.
+На обеих машинах одинаково. Настройки — Desktop → Settings → Plugins → local-sync
+(`sync_interval`, `notify`, `auto_start`, `roots`); они же в
+`plugins.entries.local-sync.settings` в config.yaml.
 
-Профиль по умолчанию берётся из `HERMES_HOME`, иначе `~/.hermes/profiles/algo`.
+Опубликовать: `git tag v0.1.0 && git push --tags`, раздавать
+`hermes plugins install owner/local-sync --ref <sha>`.
 
-### Ubuntu: systemd --user
+## Знакомство и синхронизация
+
+Демон поднимается сам при первом вызове инструмента (`auto_start`). Дальше — через
+агента или через CLI:
 
 ```bash
+bin/local-sync peers                 # кто виден в сети, у кого висит код
+bin/local-sync pair ubuntu-pc        # код, ждём подтверждения
+bin/local-sync accept mac --code 489665
+bin/local-sync sync ubuntu-pc --dry-run
+bin/local-sync sync ubuntu-pc
+bin/local-sync status
+```
+
+Инструменты для агента: `local_sync_status`, `local_sync_peers`,
+`local_sync_pair`, `local_sync_accept`, `local_sync_plan`, `local_sync_apply`.
+
+## Демон постоянно
+
+Плагин поднимает его по требованию; чтобы синк шёл без захода в Hermes — сервис:
+
+```bash
+# Ubuntu
 mkdir -p ~/.config/systemd/user
-cp ~/algo/local-sync/deploy/local-sync.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now local-sync
-loginctl enable-linger $USER      # чтобы жил без логина
+cp deploy/local-sync.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now local-sync
+loginctl enable-linger $USER
 journalctl --user -u local-sync -f
-```
 
-### macOS: launchd
-
-```bash
-cp ~/algo/local-sync/deploy/com.local.sync.plist ~/Library/LaunchAgents/
+# macOS
+cp deploy/com.local.sync.plist ~/Library/LaunchAgents/
 launchctl load -w ~/Library/LaunchAgents/com.local.sync.plist
 tail -f /tmp/local-sync.log
 ```
 
-Без сервиса: `local-sync run` в отдельном терминале.
-
-## Знакомство
-
-1. На машине A: `local-sync peers` — в списке `peers` появится устройство из сети.
-2. `local-sync pair pc` → печатает код (например `925436`); на машине B прилетает
-   уведомление с тем же кодом.
-3. На B: `local-sync accept mac --code 925436` (без `--code` тоже можно — но сверь глазами).
-4. Дальше всё делает автопин: `sync_interval` секунд, только при видимом пире.
-
-Проверить, что именно поедет, до применения:
-
-```bash
-local-sync sync pc --dry-run     # pull/push/conflict по каждому файлу
-local-sync sync pc               # применить
-```
-
-## Как агент этим пользуется (MCP)
-
-```bash
-hermes mcp add local-sync --command ~/algo/local-sync/local-sync --args mcp
-hermes mcp test local-sync
-```
-
-Инструменты: `sync_status`, `peers_list`, `pair_begin`, `pair_accept`, `sync_plan`,
-`sync_apply`. Если демон уже запущен — MCP-сервер к нему проксируется, второго
-дискаверера на машине не появляется.
+`bin/local-sync init` создаёт `~/.local-sync/config.json`: `name`, `profile`,
+`profile_dir`, `roots`, `sync_interval` (300 с), `notify`, `auto_sync`.
+Профиль берётся из `HERMES_HOME`, иначе `~/.hermes/profiles/algo`.
 
 ## Конфликты
 
-Три точки сравнения: локальный файл, файл пира и хеш с прошлой синхронизации.
+Три точки: локальный файл, файл пира, хеш с прошлой синхронизации.
 
 - изменилась одна сторона → едет она;
-- обе, но по-разному → `memories/*.md` сливаются по секциям, остальные файлы:
-  локальная версия остаётся, версия пира кладётся рядом как
-  `<файл>.conflict-<peer>-<ts>`; следующий цикл досылает локальную, пара сходится;
+- обе по-разному: `memories/*.md` сливаются по `§`; остальное — локальная версия
+  побеждает, версия пира ложится рядом `<имя>.conflict-<peer>-<ts>`, следующий
+  цикл досылает локальную, и пара сходится;
 - первый контакт без базы → побеждает более свежий mtime.
 
-Перед перезаписью старые версии складываются в `~/.local-sync/backups/<ts>/`.
+Перед перезаписью — бэкап в `~/.local-sync/backups/<ts>/`.
 
 ## Безопасность
 
-- Знакомство — по коду, который видно на обоих экранах (SAS).
-- После знакомства каждый запрос подписан HMAC-SHA256 с ключом пары; окно 5 минут.
-- Локальное управление (`/ctl`) принимается только с 127.0.0.1 и с токеном из
-  `~/.local-sync/state.json` (0600).
-- Трафик по LAN **не шифруется**: подпись защищает от подмены, не от прослушивания.
-  Для публичных Wi-Fi это осознанный компромисс; для домашней/офисной сети — норма.
-- Порт API слушает 0.0.0.0, но без ключа пары отдаёт только `/hello` и 401 на всё
-  остальное; пути нормализуются, выход за пределы профиля запрещён.
+- Знакомство по коду, который видно на обоих экранах; после — HMAC-SHA256 на
+  каждый запрос, окно 5 минут.
+- `/ctl` принимается только с loopback и с токеном из `~/.local-sync/state.json` (0600).
+- Трафик в LAN не шифруется: подпись защищает от подмены, не от прослушивания.
+- Без ключа пары API отдаёт только `/hello`, остальное — 401. Пути нормализуются,
+  выход за пределы профиля запрещён.
 
 ## Диагностика
 
+Если пиры не видят друг друга: broadcast режут гостевые и корпоративные Wi-Fi.
+После знакомства демон шлёт биконы ещё и юникастом на сохранённый адрес пира, так
+что связь переживает пропажу broadcast. Первый контакт в такой сети — вручную:
+`bin/local-sync --beacon-target 192.168.1.42:45870 run` на одной стороне.
+
+## Разработка
+
 ```bash
-local-sync status          # кто я, с кем спарен
-local-sync peers           # кто виден в сети + висящие запросы
-local-sync init            # пересоздать/посмотреть конфиг
+python3 -m unittest tests.test_sync     # 12 тестов, ~9 c
+hermes plugins doctor . --ci            # discovery + import + register
+hermes plugins validate .               # гейт каталога: 15 проверок
 ```
 
-Если пиры не видят друг друга:broadcast часто режут гостевые/корпоративные Wi-Fi.
-После первого знакомства демон шлёт биконы ещё и юникастом на сохранённый адрес
-пира, так что связь переживает пропажу broadcast. Первое знакомство в такой сети —
-вручную: `local-sync --beacon-target 192.168.1.42:45870 run` на одной стороне.
-
-## Roadmap
-
-- [x] discovery, pairing, per-file merge, memory union, MCP, notifications, autosync
-- [ ] снапшот `state.db` как read-only зеркало: `session_search` по сессиям второй машины
-- [ ] панель в desktop-приложении: найденные пиры, дрейф файлов, кнопка синхронизации
-      (нужен Python-плагин `~/.hermes/plugins/local-sync/` с `plugin_api.py`,
-      который проксирует `/ctl` демона)
-- [ ] `local-sync pair` по QR/коду без ввода команды
+Правило одно: один дискаверер на машину. CLI и MCP-сервер проксируются в уже
+запущенный демон через `/ctl`; второй бикон на том же хосте даст пиру два
+одинаковых имени.
