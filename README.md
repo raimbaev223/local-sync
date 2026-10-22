@@ -7,7 +7,7 @@ Hermes-плагин: синхронизация профиля между маш
 
 ```
 local-sync/
-├── plugin.yaml          # манифест: 6 tools, config_schema
+├── plugin.yaml          # манифест: 9 tools, config_schema
 ├── __init__.py          # register(ctx): tools + вложенный скилл
 ├── schemas.py           # схемы инструментов для модели
 ├── tools.py             # обработчики: JSON-строка, автозапуск демона, прокси в /ctl
@@ -17,7 +17,8 @@ local-sync/
 ├── bin/local-sync       # CLI: run, peers, pair, accept, plan, sync, mcp
 ├── skills/local-sync/   # вложенный скилл: когда и как пользоваться
 ├── deploy/              # systemd --user unit + launchd plist
-└── tests/               # 12 тестов на loopback
+├── docs/screenshots/    # картинка интерфейса выше
+└── tests/               # 24 теста на loopback
 ```
 
 ## Что синхронизируется
@@ -90,6 +91,14 @@ bin/local-sync status
 десктоп-приложения.
 
 ## Интерфейс (HITL)
+
+![Страница local-sync: поиск, устройства, запросы](docs/screenshots/local-sync-ui.png)
+
+Так выглядит страница `bin/local-sync ui` (в Hermes Desktop те же данные в
+панели слева, в радарном виде). Демо-стенд: три демона на loopback — `macbook`
+уже спарен с `workstation`, `tablet` только просит подключиться, поэтому у
+запроса виден код и кнопки «Подтвердить» / «Отклонить», а над списком —
+«Очистить».
 
 ```bash
 bin/local-sync ui            # поднимет демон, откроет http://127.0.0.1:45873/?t=…
