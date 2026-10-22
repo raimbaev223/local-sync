@@ -121,7 +121,7 @@ function angleFor(name) {
   return hash
 }
 
-function Radar({ peers, search, onSelect }) {
+function Radar({ peers, search, onSelect, selfName }) {
   const C = 260
   const R = 200
   const rings = [0.42, 0.68, 1].map((k, index) =>
@@ -180,7 +180,13 @@ function Radar({ peers, search, onSelect }) {
         ),
         jsx('circle', { cx: C, cy: C, r: 24, fill: 'var(--ui-accent)', opacity: 0.1 }),
         jsx('circle', { cx: C, cy: C, r: 5, fill: 'var(--ui-accent)' }),
-        jsx('text', { x: C, y: C + 42, textAnchor: 'middle', className: 'ls-self', children: 'этот компьютер' }),
+        jsx('text', {
+          x: C,
+          y: C + 42,
+          textAnchor: 'middle',
+          className: 'ls-self',
+          children: selfName ? (selfName.length > 20 ? selfName.slice(0, 19) + '…' : selfName) : 'этот компьютер'
+        }),
         ...blips
       ]
     })
@@ -278,7 +284,7 @@ function View({ api }) {
           jsxs('div', {
             className: 'ls-stage',
             children: [
-              jsx(Radar, { peers, search: searchOn, onSelect: setSelected }),
+              jsx(Radar, { peers, search: searchOn, onSelect: setSelected, selfName: me && me.name }),
               jsx('div', {
                 className: 'ls-hint',
                 children: peers.length
