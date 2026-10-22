@@ -38,7 +38,7 @@ local-sync/
 ## Установка плагина
 
 ```bash
-hermes plugins install file:///Users/erkin/algo/local-sync --ref <40-hex-sha>
+hermes plugins install file://$PWD --ref <40-hex-sha>
 hermes plugins enable local-sync
 hermes gateway restart          # подхватится в новой сессии
 ```

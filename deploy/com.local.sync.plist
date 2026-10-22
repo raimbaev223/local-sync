@@ -4,10 +4,13 @@
 <dict>
   <key>Label</key>
   <string>com.local.sync</string>
+  <!-- launchd does not expand ~ or $HOME in ProgramArguments, so run through a shell.
+       Adjust the path if the repo is not cloned into ~/algo/local-sync. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/erkin/algo/local-sync/bin/local-sync</string>
-    <string>run</string>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/algo/local-sync/bin/local-sync" run</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
