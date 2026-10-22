@@ -193,6 +193,65 @@ class PairTest(unittest.TestCase):
         target = Path(self.nodes["pc"].config["profile_dir"]) / "skills/user-skill/skill.md"
         self.assertTrue(wait_for(target.exists, timeout=15), "autosync did not push the new file")
 
+    def test_psk_pairing_with_same_password(self):
+        begun = self.a.pair_psk_begin(self.b_id, "correct horse battery")
+        self.assertEqual(len(begun["code"]), 6)
+        accepted = self.b.pair_psk_accept(self.a_id, "correct horse battery")
+        self.assertEqual(begun["code"], accepted["code"], "SAS codes must match on both sides")
+        key_a = self.nodes["mac"].state["peers"][self.b_id]["key"]
+        key_b = self.nodes["pc"].state["peers"][self.a_id]["key"]
+        self.assertEqual(key_a, key_b)
+        # password never lands in the state file
+        blob = (self.nodes["mac"].home / "state.json").read_text()
+        self.assertNotIn("correct horse battery", blob)
+
+    def test_psk_pairing_with_wrong_password_fails(self):
+        self.a.pair_psk_begin(self.b_id, "alpha-alpha")
+        with self.assertRaises(hs.AuthError):
+            self.b.pair_psk_accept(self.a_id, "beta-beta")
+        self.assertNotIn(self.a_id, self.nodes["pc"].state["peers"])
+
+    def test_search_toggle(self):
+        self.assertTrue(self.a.search_enabled())
+        self.a.set_search(False)
+        self.assertFalse(self.a.store.config["search"])
+        reloaded = hs.Store(self.nodes["mac"].home)
+        self.assertFalse(reloaded.config["search"])
+        self.a.set_search(True)
+        self.assertTrue(self.a.search_enabled())
+
+    def test_ui_endpoints_require_token(self):
+        import threading, urllib.request, urllib.error
+        from local_sync.ui import UiServer
+
+        ui = UiServer(self.nodes["mac"], port=0)
+        threading.Thread(target=ui.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{ui.port}"
+        try:
+            with urllib.request.urlopen(base + "/", timeout=5) as resp:
+                html = resp.read().decode()
+            self.assertEqual(resp.status, 200)
+            self.assertIn("local-sync", html)
+
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + "/api/status", timeout=5)
+            self.assertEqual(ctx.exception.code, 401)
+
+            with urllib.request.urlopen(f"{base}/api/status?t={ui.token}", timeout=5) as resp:
+                payload = json.loads(resp.read())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["result"]["me"]["name"], "mac")
+
+            req = urllib.request.Request(f"{base}/api/search?t={ui.token}",
+                                         data=json.dumps({"enabled": False}).encode(), method="POST",
+                                         headers={"Content-Type": "application/json",
+                                                  "X-Local-Sync-Token": ui.token})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                payload = json.loads(resp.read())
+            self.assertEqual(payload["result"], {"search": False})
+        finally:
+            ui.stop()
+
     def test_untouched_files_are_same(self):
         self.pair()
         Path(self.nodes["mac"].config["profile_dir"], "SOUL.md").write_text("soul\n")

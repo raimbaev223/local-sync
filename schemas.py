@@ -33,6 +33,11 @@ PAIR = {
         "type": "object",
         "properties": {
             "peer": {"type": "string", "description": "Peer name from local_sync_peers, e.g. 'ubuntu-pc'"},
+            "password": {
+                "type": "string",
+                "description": "Optional shared password. When set, pairing uses the password handshake: "
+                               "the same password is entered on the other machine and both print a matching code.",
+            },
         },
         "required": ["peer"],
     },
@@ -49,6 +54,7 @@ ACCEPT = {
         "properties": {
             "peer": {"type": "string", "description": "Name of the machine that asked to pair"},
             "code": {"type": "string", "description": "6-digit code shown on both machines"},
+            "password": {"type": "string", "description": "Shared password for the password handshake"},
         },
         "required": ["peer"],
     },

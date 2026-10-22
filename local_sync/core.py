@@ -137,6 +137,23 @@ def union_memory(local: bytes, remote: bytes) -> bytes:
     return ("\n§\n".join(merged) + "\n").encode() if merged else b""
 
 
+PSK_ITERATIONS = 200_000
+
+
+def psk_key(password: str, pair_id: str) -> str:
+    """Pairing key from a shared password. Never persisted until the pair confirms."""
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), pair_id.encode(), PSK_ITERATIONS, 32).hex()
+
+
+def psk_code(key_hex: str) -> str:
+    """Short code derived from the key so both screens can be compared (SAS)."""
+    return f"{int(key_hex[:8], 16) % 1_000_000:06d}"
+
+
+def hmac_tag(key_hex: str, message: str) -> str:
+    return hmac.new(bytes.fromhex(key_hex), message.encode(), hashlib.sha256).hexdigest()
+
+
 # --------------------------------------------------------------------------- store
 
 
@@ -180,6 +197,7 @@ class Store:
             "notify": True,
             "auto_sync": True,
             "sync_interval": 300,
+            "search": True,        # broadcast beacons (manual mode turns this off)
         }
 
     def save(self) -> None:
@@ -479,6 +497,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self._pair_begin(payload)
         if path == "/pair/complete":
             return self._pair_complete(payload)
+        if path == "/pair/psk":
+            return self._pair_psk_begin(payload)
+        if path == "/pair/psk/confirm":
+            return self._pair_psk_confirm(payload)
         if path == "/ctl":
             return self._ctl(payload)
         return self._json(404, {"error": "unknown route"})
@@ -520,6 +542,20 @@ class ApiHandler(BaseHTTPRequestHandler):
                 result = self.daemon.pair_begin(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "pair_accept":
                 result = self.daemon.pair_accept(self.daemon.resolve(args["peer"], wait=3.0), args.get("code"))
+            elif op == "search":
+                result = self.daemon.set_search(bool(args.get("enabled", True)))
+            elif op == "deny":
+                pair_id = args.get("pair_id", "")
+                removed = self.store.state["pending"].pop(pair_id, None) is not None
+                if removed:
+                    self.store.save()
+                result = {"denied": removed}
+            elif op == "pair_psk_begin":
+                result = self.daemon.pair_psk_begin(self.daemon.resolve(args["peer"], wait=3.0),
+                                                    args.get("password", ""))
+            elif op == "pair_psk_accept":
+                result = self.daemon.pair_psk_accept(self.daemon.resolve(args["peer"], wait=3.0),
+                                                     args.get("password", ""))
             elif op == "plan":
                 peer_id = self.daemon.resolve(args["peer"], wait=3.0)
                 result = {"plan": make_plan(self.store, self.daemon, peer_id)}
@@ -590,6 +626,59 @@ class ApiHandler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": True, "peer": self.store.state["peers"][peer_id]["name"]})
 
 
+    # password pairing (human-in-the-loop) ----------------------------------
+    def _pair_psk_begin(self, payload: dict) -> None:
+        peer_id = payload.get("id")
+        if not peer_id or peer_id == self.store.me["id"]:
+            return self._json(400, {"error": "bad id"})
+        pair_id = payload.get("pair_id") or uuid.uuid4().hex
+        self.store.state["pending"][pair_id] = {
+            "pair_id": pair_id,
+            "kind": "psk",
+            "peer_id": peer_id,
+            "peer_name": payload.get("name", "?"),
+            "peer_profile": payload.get("profile", "?"),
+            "peer_api_port": int(payload.get("api_port") or 0),
+            "peer_beacon_port": int(payload.get("beacon_port") or 0),
+            "a_nonce": payload.get("nonce") or "",
+            "code": "",
+            "created": time.time(),
+            "accepted": False,
+        }
+        self.store.save()
+        log(f"pairing request from {payload.get('name')} ({payload.get('profile')}): waiting for the password")
+        self.daemon.on_pair_requested(self.store.state["pending"][pair_id])
+        return self._json(200, {"status": "pending", "pair_id": pair_id, **self.store.me})
+
+    def _pair_psk_confirm(self, payload: dict) -> None:
+        pair_id = payload.get("pair_id", "")
+        pending = self.daemon.psk_pending.get(pair_id)
+        if not pending:
+            return self._json(404, {"error": "unknown or expired pairing"})
+        b_nonce = payload.get("b_nonce", "")
+        tag = payload.get("tag", "")
+        expected = hmac_tag(pending["key"], f"confirm:{pair_id}:{pending['nonce']}:{b_nonce}")
+        if not hmac.compare_digest(tag, expected):
+            return self._json(403, {"error": "wrong password"})
+        peer_id = pending["peer_id"]
+        self.store.state["peers"][peer_id] = {
+            "name": payload.get("name", pending.get("peer_name") or peer_id[:8]),
+            "profile": payload.get("profile", "algo"),
+            "api_port": int(payload.get("api_port") or 0),
+            "beacon_port": int(payload.get("beacon_port") or 0),
+            "addr": self.daemon.peers.get(peer_id, {}).get("addr"),
+            "key": pending["key"],
+            "paired_at": time.time(),
+            "base": {},
+        }
+        self.store.save()
+        self.daemon.psk_pending.pop(pair_id, None)
+        log(f"paired with {self.store.state['peers'][peer_id]['name']} (password)")
+        self.daemon.on_paired(peer_id)
+        ack = hmac_tag(pending["key"], f"ack:{pair_id}:{b_nonce}")
+        return self._json(200, {"ok": True, "tag": ack, "peer": self.store.state["peers"][peer_id]["name"]})
+
+
 # --------------------------------------------------------------------------- daemon
 
 
@@ -602,6 +691,8 @@ class SyncDaemon:
         self.events: list[dict] = []
         self._stop = threading.Event()
         self.wake = threading.Event()
+        self.beacon_now = threading.Event()
+        self.psk_pending: dict[str, dict] = {}
         self.bind = bind
         self.beacon_targets: list[tuple[str, int]] = []
         port = store.config["api_port"] if api_port is None else api_port
@@ -652,6 +743,7 @@ class SyncDaemon:
     def stop(self) -> None:
         self._stop.set()
         self.wake.set()
+        self.beacon_now.set()
         try:
             self.server.shutdown()
             self.server.server_close()
@@ -668,7 +760,8 @@ class SyncDaemon:
         while not self._stop.is_set():
             blob = json.dumps(payload).encode()
             with self.lock:
-                targets = list(self.beacon_targets)
+                targets = list(self.beacon_targets) if self.store.config.get("search", True) else []
+            # paired peers keep hearing from us even with discovery switched off
             for info in list(self.store.state["peers"].values()):
                 addr, port = info.get("addr"), info.get("beacon_port")
                 if addr and port:
@@ -678,7 +771,8 @@ class SyncDaemon:
                     self.send_sock.sendto(blob, (host, port))
                 except OSError:
                     pass
-            self._stop.wait(float(self.store.config.get("beacon_interval", 2.0)))
+            self.beacon_now.wait(float(self.store.config.get("beacon_interval", 2.0)))
+            self.beacon_now.clear()
 
     def sync_paired(self) -> list[dict]:
         """One pass over every paired peer that is currently visible."""
@@ -748,9 +842,14 @@ class SyncDaemon:
         pass
 
     def on_pair_requested(self, pending: dict) -> None:
-        self.notify_user(f"local-sync: {pending['peer_name']} хочет синхронизироваться",
-                         f"код {pending['code']} — подтверди: local-sync accept {pending['peer_name']}")
-        self._emit({"type": "pair_requested", "peer": pending["peer_name"], "code": pending["code"]})
+        if pending.get("kind") == "psk":
+            self.notify_user(f"local-sync: {pending['peer_name']} просит подключиться",
+                             "открой интерфейс (local-sync ui) и введи пароль")
+        else:
+            self.notify_user(f"local-sync: {pending['peer_name']} хочет синхронизироваться",
+                             f"код {pending['code']} — подтверди: local-sync accept {pending['peer_name']}")
+        self._emit({"type": "pair_requested", "peer": pending["peer_name"],
+                    "code": pending.get("code", ""), "kind": pending.get("kind", "code")})
 
     def notify_user(self, title: str, body: str) -> None:
         notify(title, body, enabled=bool(self.store.config.get("notify", True)))
@@ -769,6 +868,7 @@ class SyncDaemon:
         store = self.store
         return {"me": store.me, "profile_dir": store.config["profile_dir"],
                 "roots": store.config["roots"], "api_port": self.api_port,
+                "search": self.search_enabled(),
                 "paired": {pid: {"name": p.get("name"), "profile": p.get("profile"),
                                  "addr": p.get("addr"), "last_sync": p.get("last_sync"),
                                  "base_files": len(p.get("base", {}))}
@@ -780,11 +880,88 @@ class SyncDaemon:
                         "api_port": p["api_port"], "paired": pid in self.store.state["peers"]}
                        for pid, p in self.peers.items()]
         pending = [{"id": p["peer_id"], "name": p.get("peer_name"), "profile": p.get("peer_profile"),
+                    "pair_id": p.get("pair_id"), "kind": p.get("kind", "code"),
                     "code": p.get("code"), "initiated": bool(p.get("initiated"))}
                    for p in self.store.state["pending"].values() if not p.get("accepted")]
         return {"peers": visible, "pending": pending}
 
+    # discovery control (manual mode) --------------------------------------
+    def set_search(self, enabled: bool) -> dict:
+        self.store.config["search"] = bool(enabled)
+        self.store.save()
+        if enabled:
+            self.beacon_now.set()
+        log(f"discovery {'on' if enabled else 'off'}")
+        return {"search": bool(enabled)}
+
+    def search_enabled(self) -> bool:
+        return bool(self.store.config.get("search", True))
+
     # pairing helpers ------------------------------------------------------
+    def pair_psk_begin(self, peer_id: str, password: str) -> dict:
+        """Initiator side: send the request, keep the derived key in memory only."""
+        if not password:
+            raise AuthError("empty password")
+        addr = find_addr(self, peer_id)
+        info = self.peers[peer_id]
+        pair_id = uuid.uuid4().hex
+        nonce = secrets.token_hex(16)
+        payload = {**self.store.me, "pair_id": pair_id, "nonce": nonce}
+        req = urllib.request.Request(f"http://{addr}:{info['api_port']}/pair/psk",
+                                     data=json.dumps(payload).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            json.loads(resp.read())
+        key = psk_key(password, pair_id)
+        self.psk_pending[pair_id] = {"peer_id": peer_id, "peer_name": info["name"],
+                                     "key": key, "nonce": nonce, "created": time.time()}
+        return {"pair_id": pair_id, "code": psk_code(key), "peer": info["name"],
+                "status": "waiting for the other side to enter the same password"}
+
+    def pair_psk_accept(self, peer_id: str, password: str) -> dict:
+        """Responder side: confirm with the shared password, then verify the ack."""
+        if not password:
+            raise AuthError("empty password")
+        pending = None
+        for pair in self.store.state["pending"].values():
+            if pair.get("peer_id") == peer_id and pair.get("kind") == "psk" and not pair.get("accepted"):
+                pending = pair
+                break
+        if not pending:
+            raise AuthError("no pending pairing request from that peer")
+        addr = (self.peers.get(peer_id) or {}).get("addr")
+        if not addr:
+            raise AuthError("peer is not visible on the network right now")
+        pair_id = pending["pair_id"]
+        key = psk_key(password, pair_id)
+        nonce_b = secrets.token_hex(16)
+        tag = hmac_tag(key, f"confirm:{pair_id}:{pending['a_nonce']}:{nonce_b}")
+        payload = {"pair_id": pair_id, "b_nonce": nonce_b, "tag": tag, **self.store.me}
+        req = urllib.request.Request(f"http://{addr}:{pending['peer_api_port']}/pair/psk/confirm",
+                                     data=json.dumps(payload).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                answer = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")
+            if exc.code == 403:
+                raise AuthError("пароли не совпали — на другой машине введён другой пароль") from exc
+            raise AuthError(f"peer refused the pairing: {detail[:200]}") from exc
+        expected = hmac_tag(key, f"ack:{pair_id}:{nonce_b}")
+        if not hmac.compare_digest(answer.get("tag", ""), expected):
+            raise AuthError("peer could not confirm the key")
+        self.store.state["peers"][peer_id] = {
+            "name": pending["peer_name"], "profile": pending["peer_profile"],
+            "api_port": pending["peer_api_port"], "beacon_port": pending.get("peer_beacon_port") or 0,
+            "addr": addr, "key": key, "paired_at": time.time(), "base": {},
+        }
+        pending["accepted"] = True
+        self.store.save()
+        log(f"paired with {pending['peer_name']} (password)")
+        self._emit({"type": "paired", "peer": peer_id})
+        return {"peer": pending["peer_name"], "code": psk_code(key), "ok": True}
+
     def pair_begin(self, peer_id: str) -> dict:
         addr = find_addr(self, peer_id)
         payload = {**self.store.me, "nonce": secrets.token_hex(16)}
@@ -883,6 +1060,43 @@ def cmd_run(args) -> int:
     return 0
 
 
+def spawn_daemon(store: Store) -> subprocess.Popen | None:
+    """Start ``python -m local_sync run`` detached, logging next to the state dir."""
+    package_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(package_root), env.get("PYTHONPATH", "")]))
+    env["LOCAL_SYNC_HOME"] = str(store.home)
+    log_path = store.home / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab") as log_file:
+        return subprocess.Popen(
+            [sys.executable, "-m", "local_sync", "run"],
+            cwd=str(package_root),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True,
+        )
+
+
+def ensure_daemon(store: Store, timeout: float = 20.0) -> dict | None:
+    """Return the daemon status, starting the daemon if it is not up yet."""
+    answer = ctl(store, "status")
+    if answer and answer.get("ok"):
+        return answer["result"]
+    if not store.config.get("auto_start", True):
+        return None
+    spawn_daemon(store)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        answer = ctl(store, "status")
+        if answer and answer.get("ok"):
+            return answer["result"]
+        time.sleep(0.3)
+    return None
+
+
 def ctl(store: Store, op: str, **kwargs) -> dict | None:
     """Talk to the daemon running on this machine. None if nothing answers.
 
@@ -948,7 +1162,10 @@ def cmd_status(args) -> int:
 
 def cmd_pair(args) -> int:
     store = Store(Path(args.home))
-    answer = ctl(store, "pair_begin", peer=args.peer)
+    if getattr(args, "password", None):
+        answer = ctl(store, "pair_psk_begin", peer=args.peer, password=args.password)
+    else:
+        answer = ctl(store, "pair_begin", peer=args.peer)
     if answer is not None:
         if not answer.get("ok"):
             log(answer.get("error") or "pairing failed")
@@ -987,7 +1204,10 @@ def cmd_pair(args) -> int:
 
 def cmd_accept(args) -> int:
     store = Store(Path(args.home))
-    answer = ctl(store, "pair_accept", peer=args.peer, code=args.code)
+    if getattr(args, "password", None):
+        answer = ctl(store, "pair_psk_accept", peer=args.peer, password=args.password)
+    else:
+        answer = ctl(store, "pair_accept", peer=args.peer, code=args.code)
     if answer is not None:
         if not answer.get("ok"):
             log(answer.get("error") or "accept failed")
@@ -1172,6 +1392,18 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_ui(args) -> int:
+    from .ui import run_ui
+
+    store = Store(Path(args.home))
+    if args.name:
+        store.config["name"] = args.name
+    if args.profile_dir:
+        store.config["profile_dir"] = args.profile_dir
+    store.save()
+    return run_ui(store, port=args.ui_port, open_browser=not args.no_open, wait=args.wait or 20.0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = dict()
     parser = argparse.ArgumentParser(prog="local-sync", description=__doc__)
@@ -1188,13 +1420,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create config.json")
     sub.add_parser("run", help="run discovery + API until Ctrl-C")
     sub.add_parser("mcp", help="MCP stdio server exposing sync tools")
+    ui = sub.add_parser("ui", help="local web interface: discovery switch, pairing, sync")
+    ui.add_argument("--ui-port", type=int, default=45873)
+    ui.add_argument("--no-open", action="store_true")
     sub.add_parser("peers", help="show paired and pending peers")
     sub.add_parser("status", help="show local identity and sync state")
     p = sub.add_parser("pair", help="initiate pairing with a discovered peer")
     p.add_argument("peer")
+    p.add_argument("--password", help="use the shared-password handshake instead of a code")
     p = sub.add_parser("accept", help="confirm an incoming pairing request")
     p.add_argument("peer")
     p.add_argument("--code")
+    p.add_argument("--password", help="answer the shared-password handshake")
     for name, text in (("plan", "show the diff against a peer"), ("sync", "apply the diff")):
         p = sub.add_parser(name, help=text)
         p.add_argument("peer")
@@ -1205,7 +1442,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    handlers = {"init": cmd_init, "run": cmd_run, "mcp": cmd_mcp, "peers": cmd_peers, "status": cmd_status,
+    handlers = {"init": cmd_init, "run": cmd_run, "mcp": cmd_mcp, "ui": cmd_ui,
+                "peers": cmd_peers, "status": cmd_status,
                 "pair": cmd_pair, "accept": cmd_accept, "plan": cmd_plan, "sync": cmd_sync}
     return handlers[args.cmd](args)
 

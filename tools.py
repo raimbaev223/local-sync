@@ -40,39 +40,9 @@ def _store() -> core.Store:
     return store
 
 
-def _spawn_daemon(store: core.Store) -> None:
-    plugin_dir = Path(__file__).resolve().parent
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(plugin_dir), env.get("PYTHONPATH", "")]))
-    log_path = store.home / "daemon.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "ab") as log_file:
-        subprocess.Popen(
-            [sys.executable, "-m", "local_sync", "run"],
-            cwd=str(plugin_dir),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=log_file,
-            start_new_session=True,
-        )
-
-
 def _daemon(store: core.Store) -> dict | None:
     """Return the daemon's status, starting it in the background when allowed."""
-    answer = core.ctl(store, "status")
-    if answer and answer.get("ok"):
-        return answer["result"]
-    if not store.config.get("auto_start", True):
-        return None
-    _spawn_daemon(store)
-    deadline = time.time() + DAEMON_START_TIMEOUT
-    while time.time() < deadline:
-        answer = core.ctl(store, "status")
-        if answer and answer.get("ok"):
-            return answer["result"]
-        time.sleep(0.3)
-    return None
+    return core.ensure_daemon(store, timeout=DAEMON_START_TIMEOUT)
 
 
 def _call(op: str, **kwargs: Any) -> dict:
@@ -114,11 +84,21 @@ def peers(args: dict) -> str:
 
 def pair(args: dict) -> str:
     def go(a: dict) -> dict:
-        result = _call("pair_begin", peer=a["peer"])
-        result["next"] = (
-            f"Confirm the code on the other machine: local_sync_accept(peer=..., code={result['code']}) "
-            "or `local-sync accept <this-machine> --code " + result["code"] + "`."
-        )
+        op = "pair_psk_begin" if a.get("password") else "pair_begin"
+        kwargs = {"peer": a["peer"]}
+        if a.get("password"):
+            kwargs["password"] = a["password"]
+        result = _call(op, **kwargs)
+        if a.get("password"):
+            result["next"] = (
+                "On the other machine enter the SAME password: local_sync_accept(peer=..., password=...) "
+                f"or `local-sync ui`. Codes must match: {result.get('code')}"
+            )
+        else:
+            result["next"] = (
+                f"Confirm the code on the other machine: local_sync_accept(peer=..., code={result['code']}) "
+                "or `local-sync accept <this-machine> --code " + result["code"] + "`."
+            )
         return result
 
     return _run(go, args)
@@ -126,6 +106,8 @@ def pair(args: dict) -> str:
 
 def accept(args: dict) -> str:
     def go(a: dict) -> dict:
+        if a.get("password"):
+            return _call("pair_psk_accept", peer=a["peer"], password=a["password"])
         return _call("pair_accept", peer=a["peer"], code=a.get("code"))
 
     return _run(go, args)

@@ -37,9 +37,17 @@ out of scope — machine-specific or secret.
 | `local_sync_apply` | apply now |
 
 Start with `local_sync_status`; if the peer is not listed, `local_sync_peers`.
-Pairing is two-sided on purpose: the code is shown on both screens, then
-confirmed on the receiving machine. Never accept on the user's behalf without
-them reading the code out loud.
+
+Pairing is two-sided on purpose and always needs the human: either a 6-digit code
+shown on both screens, or a shared password typed on both machines
+(`local_sync_pair(peer=..., password=...)` then `local_sync_accept(peer=...,
+password=...)`). Both flows print the same 6-digit code as a check — report it and
+ask the user to compare the two screens. Never accept on the user's behalf.
+
+For a click-through version of the same actions (discovery switch, pending
+requests, plan, sync) point the user at `local-sync ui` — a loopback-only page
+with a token in the URL. Prefer the UI when the user wants manual control over
+what pairs and what syncs.
 
 ## What a plan means
 
