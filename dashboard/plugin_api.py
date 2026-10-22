@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -24,13 +27,50 @@ def _home() -> Path:
     return Path(os.environ.get("LOCAL_SYNC_HOME") or (Path.home() / ".local-sync")).expanduser()
 
 
+def _spawn_daemon() -> None:
+    """Start the sync daemon detached, so the pane works without touching a terminal."""
+    plugin_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(plugin_root), env.get("PYTHONPATH", "")]))
+    env["LOCAL_SYNC_HOME"] = str(_home())
+    log_path = _home() / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(log_path, "ab") as log_file:
+            subprocess.Popen(
+                [sys.executable, "-m", "local_sync", "run"],
+                cwd=str(plugin_root), env=env, stdin=subprocess.DEVNULL,
+                stdout=log_file, stderr=log_file, start_new_session=True,
+            )
+    except OSError:
+        pass
+
+
 def _ctl(op: str, **args: Any) -> dict:
+    answer = _ctl_once(op, **args)
+    if answer.get("ok") is False and _looks_like_no_daemon(answer):
+        _spawn_daemon()
+        deadline = time.time() + 8.0
+        while time.time() < deadline:
+            time.sleep(0.4)
+            answer = _ctl_once(op, **args)
+            if not (answer.get("ok") is False and _looks_like_no_daemon(answer)):
+                break
+    return answer
+
+
+def _looks_like_no_daemon(answer: dict) -> bool:
+    text = str(answer.get("error", ""))
+    return "не запущен" in text or "не отвечает" in text
+
+
+def _ctl_once(op: str, **args: Any) -> dict:
     home = _home()
     try:
         config = json.loads((home / "config.json").read_text())
         state = json.loads((home / "state.json").read_text())
     except (OSError, json.JSONDecodeError):
-        return {"ok": False, "error": "local-sync ещё не запускался: нет ~/.local-sync/config.json"}
+        return {"ok": False, "error": "демон не запущен: нет ~/.local-sync/config.json"}
     token = state.get("ctl_token")
     if not token:
         return {"ok": False, "error": "демон не запущен"}
