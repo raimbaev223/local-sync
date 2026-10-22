@@ -202,10 +202,16 @@ function View({ api }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [st, peers, journal] = await Promise.all([api.status(), api.peers(), api.logs(40)])
+      // logs come from a newer route; an old gateway must not break the whole page
+      const [st, peers] = await Promise.all([api.status(), api.peers()])
       setStatus(st)
       setTable(peers)
-      setEntries((journal && journal.entries) || [])
+      try {
+        const journal = await api.logs(40)
+        setEntries((journal && journal.entries) || [])
+      } catch (err) {
+        setEntries([])
+      }
     } catch (err) {
       setLog(String(err && err.message ? err.message : err))
     }
