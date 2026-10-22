@@ -1,0 +1,7 @@
+{
+  "name": "local-sync",
+  "label": "local-sync",
+  "description": "LAN sync of skills, memory and cron between machines",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}
