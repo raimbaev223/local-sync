@@ -29,6 +29,7 @@ PAGE = """<!doctype html>
   .sub{color:var(--dim);font-size:12px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-top:16px}
   .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .row h2{margin:0}
   .peer{padding:12px 0;border-top:1px solid var(--line)}
   .peer:first-child{border-top:0;padding-top:0}
   .name{font-weight:600}
@@ -68,7 +69,10 @@ PAGE = """<!doctype html>
   </section>
 
   <section class="card">
-    <h2>Запросы на подключение</h2>
+    <div class="row">
+      <h2>Запросы на подключение</h2>
+      <button class="danger" id="clearPending" onclick="clearRequests()" style="display:none">Очистить</button>
+    </div>
     <div id="pending"><div class="empty">нет</div></div>
   </section>
 
@@ -127,6 +131,8 @@ function renderPeers(peers, pairedIds) {
 }
 
 function renderPending(items) {
+  const clear = $("clearPending");
+  if (clear) clear.style.display = items.length ? "" : "none";
   if (!items.length) { $("pending").innerHTML = '<div class="empty">нет</div>'; return; }
   $("pending").innerHTML = items.map(p => {
     const id = String(p.pair_id || p.id).slice(0, 8);
@@ -171,6 +177,11 @@ async function acceptCode(peer, code) {
 }
 async function deny(pairId) {
   try { show((await api("/api/deny", {pair_id: pairId})).result); }
+  catch (e) { show(e.message, true); }
+  refresh();
+}
+async function clearRequests() {
+  try { show((await api("/api/clear-requests", {})).result); }
   catch (e) { show(e.message, true); }
   refresh();
 }
@@ -261,6 +272,7 @@ class UiHandler(BaseHTTPRequestHandler):
             "/api/pair": ("pair_psk_begin", lambda p: {"peer": p.get("peer", ""), "password": p.get("password", "")}),
             "/api/accept": ("pair_psk_accept", lambda p: {"peer": p.get("peer", ""), "password": p.get("password", "")}),
             "/api/deny": ("deny", lambda p: {"pair_id": p.get("pair_id", "")}),
+            "/api/clear-requests": ("clear_requests", lambda p: {}),
             "/api/plan": ("plan", lambda p: {"peer": p.get("peer", "")}),
             "/api/sync": ("sync", lambda p: {"peer": p.get("peer", "")}),
         }

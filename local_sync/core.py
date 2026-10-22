@@ -157,6 +157,23 @@ def hmac_tag(key_hex: str, message: str) -> str:
     return hmac.new(bytes.fromhex(key_hex), message.encode(), hashlib.sha256).hexdigest()
 
 
+def supersede_pending(store: "Store", peer_id: str, keep: str = "") -> int:
+    """One device, one request: a newer request replaces the older ones.
+
+    Requests are keyed by ``pair_id``, so without this every retry from the same
+    machine (or the same machine behind a new instance id) added another row that
+    nobody could tell apart. Only unsettled requests are dropped: an accepted one
+    is the record of a pairing that already happened.
+    """
+    dropped = 0
+    for pair_id, item in list(store.state["pending"].items()):
+        if pair_id == keep or item.get("peer_id") != peer_id or item.get("accepted"):
+            continue
+        store.state["pending"].pop(pair_id, None)
+        dropped += 1
+    return dropped
+
+
 # --------------------------------------------------------------------------- store
 
 
@@ -734,6 +751,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if removed:
                     self.store.save()
                 result = {"denied": removed}
+            elif op == "clear_requests":
+                result = self.daemon.clear_requests()
             elif op == "pair_auto":
                 result = self.daemon.pair_auto(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "pair_psk_begin":
@@ -770,6 +789,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "bad id"})
         pair_id = uuid.uuid4().hex
         code = f"{secrets.randbelow(1_000_000):06d}"
+        supersede_pending(self.store, peer_id)
         self.store.state["pending"][pair_id] = {
             "pair_id": pair_id,
             "peer_id": peer_id,
@@ -826,6 +846,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         if not peer_id or peer_id == self.store.me["id"]:
             return self._json(400, {"error": "bad id"})
         pair_id = payload.get("pair_id") or uuid.uuid4().hex
+        supersede_pending(self.store, peer_id)
         self.store.state["pending"][pair_id] = {
             "pair_id": pair_id,
             "kind": "psk",
@@ -1109,6 +1130,25 @@ class SyncDaemon:
                    for p in self.store.state["pending"].values() if not p.get("accepted")]
         return {"peers": visible, "pending": pending}
 
+    def clear_requests(self) -> dict:
+        """Drop every request still waiting for an answer («Очистить» in the UIs).
+
+        Denying one by one is fine for a decision, but a request from a machine
+        that never came back is just litter: it holds a row forever and there is
+        nothing to decide. Accepted entries stay — they are the record of a
+        pairing that happened.
+        """
+        cleared = 0
+        for pair_id, item in list(self.store.state["pending"].items()):
+            if item.get("accepted"):
+                continue
+            self.store.state["pending"].pop(pair_id, None)
+            cleared += 1
+        if cleared:
+            self.store.save()
+            log(f"cleared {cleared} pending pairing request(s)")
+        return {"cleared": cleared}
+
     # discovery control (manual mode) --------------------------------------
     def peer_profiles(self, peer_id: str) -> dict:
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
@@ -1204,6 +1244,11 @@ class SyncDaemon:
         with urllib.request.urlopen(req, timeout=10) as resp:
             json.loads(resp.read())
         key = psk_key(password, pair_id)
+        # A second attempt to the same peer replaces the first: the peer's own
+        # store keeps only the newest pair_id, so the older nonce can never be
+        # confirmed and would just sit here as a dead entry.
+        for stale in [pid for pid, item in self.psk_pending.items() if item.get("peer_id") == peer_id]:
+            self.psk_pending.pop(stale, None)
         self.psk_pending[pair_id] = {"peer_id": peer_id, "peer_name": info["name"],
                                      "key": key, "nonce": nonce, "created": time.time()}
         return {"pair_id": pair_id, "code": psk_code(key), "peer": info["name"],
@@ -1276,6 +1321,7 @@ class SyncDaemon:
             "nonce": payload["nonce"], "code": answer["code"],
             "initiated": True, "created": time.time(), "accepted": False,
         }
+        supersede_pending(self.store, peer_id, keep=answer["pair_id"])
         self.store.save()
         return {"pair_id": answer["pair_id"], "code": answer["code"], "peer": peer_id}
 

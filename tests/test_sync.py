@@ -231,6 +231,33 @@ class PairTest(unittest.TestCase):
         self.assertEqual(self.nodes["mac"].state["peers"][self.b_id]["key"],
                          self.nodes["pc"].state["peers"][self.a_id]["key"])
 
+    def test_repeat_request_replaces_the_previous_one(self):
+        first = self.a.pair_begin(self.b_id)
+        second = self.a.pair_begin(self.b_id)
+        self.assertNotEqual(first["pair_id"], second["pair_id"])
+
+        def waiting(store):
+            return [p["pair_id"] for p in store.state["pending"].values() if not p.get("accepted")]
+
+        self.assertEqual(waiting(self.nodes["pc"]), [second["pair_id"]],
+                         "the answerer keeps only the newest request from that device")
+        self.assertEqual(waiting(self.nodes["mac"]), [second["pair_id"]],
+                         "the initiator's own older attempt is dead weight too")
+        self.assertEqual(len(self.b.peer_table()["pending"]), 1)
+
+    def test_clear_requests_drops_them_from_the_screen(self):
+        self.a.pair_begin(self.b_id)
+        self.a.pair_begin(self.b_id)
+        self.assertEqual(len(self.b.peer_table()["pending"]), 1)
+        self.assertEqual(self.b.clear_requests(), {"cleared": 1})
+        self.assertEqual(self.b.peer_table()["pending"], [])
+
+    def test_clear_requests_keeps_a_finished_pairing(self):
+        self.pair()
+        before = json.dumps(self.nodes["pc"].state["pending"], sort_keys=True)
+        self.assertEqual(self.b.clear_requests(), {"cleared": 0})
+        self.assertEqual(json.dumps(self.nodes["pc"].state["pending"], sort_keys=True), before)
+
     def test_sessions_copy_is_insert_only(self):
         import sqlite3
         self.pair()

@@ -46,6 +46,7 @@ const CSS = `
 .ls-side header{padding:14px 16px 10px;border-bottom:1px solid var(--ui-stroke-secondary)}
 .ls-side header b{font-size:12.5px;color:var(--ui-text-primary)}
 .ls-side header div{color:var(--ui-text-tertiary);font-size:11.5px;margin-top:2px}
+.ls-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .ls-scroll{overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
 .ls-peer{border:1px solid var(--ui-stroke-secondary);border-radius:12px;padding:11px;
   display:flex;flex-direction:column;gap:9px;background:color-mix(in srgb,var(--ui-accent) 3%,transparent)}
@@ -86,6 +87,7 @@ function makeApi(rest) {
     pair: (peer) => call('/pair', { peer }),
     accept: (peer, code) => call('/accept', { peer, password: code, code }),
     deny: (pairId) => call('/deny', { pair_id: pairId }),
+    clearRequests: () => call('/clear-requests', {}),
     plan: (peer) => call('/plan', { peer }),
     sync: (peer) => call('/sync', { peer }),
     sessions: (peer) => call('/sessions', { peer }),
@@ -253,7 +255,21 @@ function View({ api }) {
         children: [
           jsxs('header', {
             children: [
-              jsx('b', { children: pending.length ? `Запросы (${pending.length})` : 'На радаре' }),
+              jsxs('div', {
+                className: 'ls-head',
+                children: [
+                  jsx('b', { children: pending.length ? `Запросы (${pending.length})` : 'На радаре' }),
+                  pending.length
+                    ? jsx('button', {
+                        className: 'ls-act',
+                        disabled: busy,
+                        title: 'Убрать все запросы, которые ещё висят',
+                        onClick: () => act(() => api.clearRequests(), 'запросы очищены'),
+                        children: 'Очистить'
+                      })
+                    : null
+                ]
+              }),
               jsx('div', { children: `${peers.length} устройств · ${pairedCount} спарено` })
             ]
           }),

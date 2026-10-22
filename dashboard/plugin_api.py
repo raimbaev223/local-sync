@@ -123,6 +123,11 @@ def deny(body: dict) -> dict:
     return _ctl("deny", pair_id=body.get("pair_id", ""))
 
 
+@router.post("/clear-requests")
+def clear_requests() -> dict:
+    return _ctl("clear_requests")
+
+
 @router.post("/plan")
 def plan(body: dict) -> dict:
     return _ctl("plan", peer=body.get("peer", ""))
