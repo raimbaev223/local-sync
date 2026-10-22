@@ -205,6 +205,16 @@ class PairTest(unittest.TestCase):
         blob = (self.nodes["mac"].home / "state.json").read_text()
         self.assertNotIn("correct horse battery", blob)
 
+    def test_numeric_pin_is_enough(self):
+        begun = self.a.pair_psk_begin(self.b_id, "4821")
+        accepted = self.b.pair_psk_accept(self.a_id, "4821")
+        self.assertEqual(begun["code"], accepted["code"])
+        self.assertIn(self.b_id, self.nodes["mac"].state["peers"])
+
+    def test_short_pin_is_rejected(self):
+        with self.assertRaises(hs.AuthError):
+            self.a.pair_psk_begin(self.b_id, "123")
+
     def test_psk_pairing_with_wrong_password_fails(self):
         self.a.pair_psk_begin(self.b_id, "alpha-alpha")
         with self.assertRaises(hs.AuthError):

@@ -900,8 +900,8 @@ class SyncDaemon:
     # pairing helpers ------------------------------------------------------
     def pair_psk_begin(self, peer_id: str, password: str) -> dict:
         """Initiator side: send the request, keep the derived key in memory only."""
-        if not password:
-            raise AuthError("empty password")
+        if len(password) < 4:
+            raise AuthError("пароль короче 4 символов")
         addr = find_addr(self, peer_id)
         info = self.peers[peer_id]
         pair_id = uuid.uuid4().hex
@@ -920,8 +920,8 @@ class SyncDaemon:
 
     def pair_psk_accept(self, peer_id: str, password: str) -> dict:
         """Responder side: confirm with the shared password, then verify the ack."""
-        if not password:
-            raise AuthError("empty password")
+        if len(password) < 4:
+            raise AuthError("пароль короче 4 символов")
         pending = None
         for pair in self.store.state["pending"].values():
             if pair.get("peer_id") == peer_id and pair.get("kind") == "psk" and not pair.get("accepted"):
@@ -1392,6 +1392,29 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    store = Store(Path(args.home))
+    if args.state is None:
+        answer = ctl(store, "status")
+        if answer and answer.get("ok"):
+            _print({"search": answer["result"].get("search")})
+            return 0
+        _print({"search": store.config.get("search", True), "note": "daemon is not running"})
+        return 0
+    enabled = args.state == "on"
+    answer = ctl(store, "search", enabled=enabled)
+    if answer is None:
+        store.config["search"] = enabled
+        store.save()
+        _print({"search": enabled, "note": "saved for the next daemon start"})
+        return 0
+    if not answer.get("ok"):
+        log(answer.get("error") or "failed")
+        return 1
+    _print(answer["result"])
+    return 0
+
+
 def cmd_ui(args) -> int:
     from .ui import run_ui
 
@@ -1425,6 +1448,8 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-open", action="store_true")
     sub.add_parser("peers", help="show paired and pending peers")
     sub.add_parser("status", help="show local identity and sync state")
+    search = sub.add_parser("search", help="turn LAN discovery on/off (manual mode)")
+    search.add_argument("state", nargs="?", choices=["on", "off"])
     p = sub.add_parser("pair", help="initiate pairing with a discovered peer")
     p.add_argument("peer")
     p.add_argument("--password", help="use the shared-password handshake instead of a code")
@@ -1443,7 +1468,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {"init": cmd_init, "run": cmd_run, "mcp": cmd_mcp, "ui": cmd_ui,
-                "peers": cmd_peers, "status": cmd_status,
+                "peers": cmd_peers, "status": cmd_status, "search": cmd_search,
                 "pair": cmd_pair, "accept": cmd_accept, "plan": cmd_plan, "sync": cmd_sync}
     return handlers[args.cmd](args)
 

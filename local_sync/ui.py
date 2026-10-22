@@ -121,7 +121,7 @@ function renderPeers(peers, pairedIds) {
             : `<button class="primary" onclick="togglePw('${id}')">Подключить</button>`}
         </div>
       </div>
-      ${paired ? "" : pwBlock(id, "общий пароль (одинаковый на обеих машинах)", `pair('${esc(p.name)}','${id}')`)}
+      ${paired ? "" : pwBlock(id, "пароль: тот же на обеих машинах (можно просто цифры)", `pair('${esc(p.name)}','${id}')`)}
     </div>`;
   }).join("");
 }
@@ -142,7 +142,7 @@ function renderPending(items) {
           <button class="danger" onclick="deny('${esc(p.pair_id || "")}')">Отклонить</button>
         </div>
       </div>
-      ${psk ? pwBlock("p" + id, "пароль, который ввели на другой машине", `acceptPsk('${esc(p.name)}','p${id}')`) : ""}
+      ${psk ? pwBlock("p" + id, "пароль, который ввели на другой машине (можно просто цифры)", `acceptPsk('${esc(p.name)}','p${id}')`) : ""}
     </div>`;
   }).join("");
 }
@@ -152,14 +152,14 @@ function togglePwPending(id) { const el = $("pw-p" + id); if (el) el.classList.t
 
 async function pair(peer, id) {
   const password = $("pwi-" + id).value;
-  if (!password) return show("введи пароль", true);
+  if (password.length < 4) return show("пароль короче 4 символов", true);
   try { show((await api("/api/pair", {peer, password})).result); }
   catch (e) { show(e.message, true); }
   refresh();
 }
 async function acceptPsk(peer, id) {
   const password = $("pwi-" + id).value;
-  if (!password) return show("введи пароль", true);
+  if (password.length < 4) return show("пароль короче 4 символов", true);
   try { show((await api("/api/accept", {peer, password})).result); }
   catch (e) { show(e.message, true); }
   refresh();
