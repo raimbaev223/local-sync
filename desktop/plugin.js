@@ -7,7 +7,7 @@
  * only renders and calls ctx.rest.
  */
 
-import { haptic, host } from '@hermes/plugin-sdk'
+import { haptic } from '@hermes/plugin-sdk'
 import { useCallback, useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
@@ -271,28 +271,21 @@ export default {
   name: 'local-sync',
   register(ctx) {
     const api = makeApi((path, options) => ctx.rest(path, options))
+
+    // A full page in the workspace, reached from a row in the sidebar nav —
+    // the same place Artifacts and Kanban live. Registry areas are plain
+    // strings: 'routes' mounts the page, 'sidebar.nav' adds the row.
     ctx.register({
-      id: 'pane',
-      area: 'panes',
+      id: 'page',
+      area: 'routes',
       title: 'local-sync',
-      data: { placement: 'left', width: '300px' },
+      data: { path: '/local-sync' },
       render: () => jsx(Pane, { api })
     })
     ctx.register({
-      id: 'open-ui',
-      area: 'statusBar.right',
-      order: 140,
-      render: () =>
-        jsx('button', {
-          className: 'inline-flex h-full items-center px-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:text-foreground',
-          type: 'button',
-          title: 'local-sync — открыть интерфейс в браузере',
-          onClick: () => {
-            haptic('tap')
-            host.notify({ kind: 'info', message: 'local-sync: панель в боковой колонке' })
-          },
-          children: 'sync'
-        })
+      id: 'nav',
+      area: 'sidebar.nav',
+      data: { path: '/local-sync', label: 'local-sync', codicon: 'radio-tower' }
     })
   }
 }
