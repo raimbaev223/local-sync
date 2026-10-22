@@ -106,6 +106,8 @@ function makeApi(rest) {
     sessions: (peer) => call('/sessions', { peer }),
     profiles: (peer) => call('/peer-profiles', { peer }),
     ping: (peer) => call('/peer-ping', { peer }),
+    skills: (peer) => call('/peer-skills', { peer }),
+    importSkill: (peer, skill, overwrite) => call('/import-skill', { peer, skill, overwrite: !!overwrite }),
     unpair: (peer) => call('/unpair', { peer }),
     logs: (limit = 40) => call('/logs?limit=' + limit),
     importProfile: (peer, profile, mode, localName) =>
@@ -191,6 +193,7 @@ function View({ api }) {
   const [selected, setSelected] = useState(null)
   const [handoff, setHandoff] = useState(null)
   const [profiles, setProfiles] = useState(null)
+  const [skillsPanel, setSkillsPanel] = useState(null)
   const [draft, setDraft] = useState({})
   const [log, setLog] = useState('')
   const [pings, setPings] = useState({})
@@ -389,6 +392,19 @@ function View({ api }) {
                                 disabled: busy,
                                 onClick: async () => {
                                   try {
+                                    const answer = await api.skills(peer.name)
+                                    setSkillsPanel({ peer: peer.name, items: answer.skills || [] })
+                                  } catch (err) {
+                                    setLog(String(err && err.message ? err.message : err))
+                                  }
+                                },
+                                children: 'Скиллы'
+                              }),
+                              jsx('button', {
+                                className: 'ls-act',
+                                disabled: busy,
+                                onClick: async () => {
+                                  try {
                                     const answer = await api.profiles(peer.name)
                                     setProfiles({ peer: peer.name, items: answer.profiles || [] })
                                   } catch (err) {
@@ -445,6 +461,37 @@ function View({ api }) {
                   peer.id || peer.name
                 )
               ),
+              skillsPanel
+                ? jsxs('div', {
+                    className: 'ls-peer',
+                    children: [
+                      jsx('div', { className: 'ls-meta', children: `скиллы ${skillsPanel.peer}` }),
+                      ...skillsPanel.items.map((item) =>
+                        jsxs(
+                          'div',
+                          {
+                            className: 'ls-row',
+                            children: [
+                              jsxs('div', {
+                                children: [
+                                  jsx('div', { className: 'ls-nm', children: item.name }),
+                                  jsx('div', { className: 'ls-meta', children: `${item.files} файлов · ${Math.max(1, Math.round(item.bytes / 1024))} КБ` })
+                                ]
+                              }),
+                              jsx('button', {
+                                className: 'ls-act primary',
+                                disabled: busy,
+                                onClick: () => act(() => api.importSkill(skillsPanel.peer, item.path, false), `скачан ${item.name}`),
+                                children: 'Скачать'
+                              })
+                            ]
+                          },
+                          item.path
+                        )
+                      )
+                    ]
+                  })
+                : null,
               profiles
                 ? jsxs('div', {
                     className: 'ls-peer',

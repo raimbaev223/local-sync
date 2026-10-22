@@ -152,6 +152,15 @@ def logs(args: dict) -> str:
     return _run(lambda a: _call("logs", limit=int(a.get("limit") or 60)), args)
 
 
+def skills(args: dict) -> str:
+    return _run(lambda a: _call("peer_skills", peer=a["peer"]), args)
+
+
+def import_skill(args: dict) -> str:
+    return _run(lambda a: _call("import_skill", peer=a["peer"], skill=a["skill"],
+                                overwrite=bool(a.get("overwrite"))), args)
+
+
 HANDLERS = {
     "local_sync_status": status,
     "local_sync_peers": peers,
@@ -165,4 +174,6 @@ HANDLERS = {
     "local_sync_ping": ping,
     "local_sync_unpair": unpair,
     "local_sync_logs": logs,
+    "local_sync_skills": skills,
+    "local_sync_import_skill": import_skill,
 }

@@ -28,6 +28,8 @@ provides_tools:
   - local_sync_ping
   - local_sync_unpair
   - local_sync_logs
+  - local_sync_skills
+  - local_sync_import_skill
 
 config_schema:
   sync_interval:

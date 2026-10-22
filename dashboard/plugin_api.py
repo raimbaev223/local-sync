@@ -153,6 +153,17 @@ def logs(limit: int = 60) -> dict:
     return _ctl("logs", limit=limit)
 
 
+@router.post("/peer-skills")
+def peer_skills(body: dict) -> dict:
+    return _ctl("peer_skills", peer=body.get("peer", ""))
+
+
+@router.post("/import-skill")
+def import_skill(body: dict) -> dict:
+    return _ctl("import_skill", peer=body.get("peer", ""), skill=body.get("skill", ""),
+                overwrite=bool(body.get("overwrite")))
+
+
 @router.post("/peer-profiles")
 def peer_profiles(body: dict) -> dict:
     return _ctl("peer_profiles", peer=body.get("peer", ""))

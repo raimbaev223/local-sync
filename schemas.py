@@ -177,4 +177,31 @@ LOGS = {
     },
 }
 
-TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS, PROFILES, IMPORT_PROFILE, PING, UNPAIR, LOGS]
+SKILLS = {
+    "name": "local_sync_skills",
+    "description": (
+        "List the skills that exist on the paired machine (bundled ones excluded), with file count "
+        "and size. Use when the user wants a skill from the other machine."
+    ),
+    "parameters": {"type": "object", "properties": {"peer": {"type": "string"}}, "required": ["peer"]},
+}
+
+IMPORT_SKILL = {
+    "name": "local_sync_import_skill",
+    "description": (
+        "Download one skill from the paired machine into this profile's skills/ directory. "
+        "Pass the 'path' value returned by local_sync_skills."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "peer": {"type": "string"},
+            "skill": {"type": "string", "description": "Skill path, e.g. 'software-development/github'"},
+            "overwrite": {"type": "boolean"},
+        },
+        "required": ["peer", "skill"],
+    },
+}
+
+TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS, PROFILES, IMPORT_PROFILE,
+         PING, UNPAIR, LOGS, SKILLS, IMPORT_SKILL]

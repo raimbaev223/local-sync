@@ -332,6 +332,34 @@ class PairTest(unittest.TestCase):
         with self.assertRaises(hs.AuthError):
             self.a.import_profile(self.b_id, "default", "algo")  # active profile is off limits
 
+    def test_peer_skills_listing_and_download(self):
+        self.pair()
+        remote = {
+            "skills/user-skill/SKILL.md": "---\nname: user-skill\n---\nfrom pc\n",
+            "skills/user-skill/references/notes.md": "notes\n",
+            "skills/other/SKILL.md": "---\nname: other\n---\n",
+        }
+        base = Path(self.nodes["pc"].config["profile_dir"])
+        for rel, text in remote.items():
+            path = base / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+        listed = self.a.peer_skills(self.b_id)
+        names = {item["name"]: item for item in listed["skills"]}
+        self.assertEqual(set(names), {"user-skill", "other"})
+        self.assertEqual(names["user-skill"]["files"], 2)
+
+        result = self.a.import_skill(self.b_id, "user-skill")
+        self.assertEqual((result["files"], result["skipped"]), (2, 0))
+        local = Path(self.nodes["mac"].config["profile_dir"]) / "skills/user-skill"
+        self.assertIn("from pc", (local / "SKILL.md").read_text())
+        self.assertTrue((local / "references/notes.md").exists())
+        # second download keeps local files instead of duplicating
+        self.assertEqual(self.a.import_skill(self.b_id, "user-skill")["skipped"], 2)
+        # other skill was not touched
+        self.assertFalse((Path(self.nodes["mac"].config["profile_dir"]) / "skills/other").exists())
+
     def test_search_toggle(self):
         self.assertTrue(self.a.search_enabled())
         self.a.set_search(False)

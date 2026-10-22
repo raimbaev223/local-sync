@@ -811,6 +811,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             elif op == "pair_psk_accept":
                 result = self.daemon.pair_psk_accept(self.daemon.resolve(args["peer"], wait=3.0),
                                                      args.get("password", ""))
+            elif op == "peer_skills":
+                result = self.daemon.peer_skills(self.daemon.resolve(args["peer"], wait=3.0))
+            elif op == "import_skill":
+                result = self.daemon.import_skill(self.daemon.resolve(args["peer"], wait=3.0),
+                                                  args["skill"], bool(args.get("overwrite")))
             elif op == "peer_profiles":
                 result = self.daemon.peer_profiles(self.daemon.resolve(args["peer"], wait=3.0))
             elif op == "import_profile":
@@ -1291,6 +1296,47 @@ class SyncDaemon:
         self.store.save()
         log(f"unpaired {name} — спаривание и ключ удалены", "warn")
         return {"removed": True, "peer": name}
+
+    def peer_skills(self, peer_id: str) -> dict:
+        """Skills on the peer (bundled ones are filtered out by the manifest)."""
+        client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
+        files = client.manifest()
+        found: dict[str, dict] = {}
+        for rel in files:
+            parts = rel.split("/")
+            if len(parts) >= 3 and rel.startswith("skills/") and rel.endswith("/SKILL.md"):
+                path = "/".join(parts[1:-1])
+                found[path] = {"path": path, "name": parts[-2], "files": 0, "bytes": 0}
+        for rel, meta in files.items():
+            for path, item in found.items():
+                if rel.startswith("skills/" + path + "/"):
+                    item["files"] += 1
+                    item["bytes"] += int(meta.get("size") or 0)
+        return {"peer": self.peers[peer_id]["name"],
+                "skills": sorted(found.values(), key=lambda item: item["name"])}
+
+    def import_skill(self, peer_id: str, path: str, overwrite: bool = False) -> dict:
+        """Download one skill from the peer into this profile's skills/."""
+        cleaned = path.strip().strip("/")
+        if not cleaned or ".." in cleaned.split("/") or cleaned.startswith("."):
+            raise AuthError("плохой путь скилла")
+        client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
+        files = client.manifest()
+        prefix = f"skills/{cleaned}/"
+        wanted = [rel for rel in files if rel.startswith(prefix)]
+        if not wanted:
+            raise AuthError(f"скилл {cleaned} не найден на пире")
+        dest_root = Path(self.store.config["profile_dir"]).expanduser() / "skills"
+        created = skipped = 0
+        for rel in wanted:
+            target = safe_target(dest_root, rel[len("skills/"):])
+            if target.exists() and not overwrite:
+                skipped += 1
+                continue
+            atomic_write(target, client.fetch(rel))
+            created += 1
+        log(f"skill {cleaned} from {self.peers[peer_id]['name']}: {created} files")
+        return {"skill": cleaned.split("/")[-1], "path": cleaned, "files": created, "skipped": skipped}
 
     def peer_profiles(self, peer_id: str) -> dict:
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
