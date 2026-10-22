@@ -138,6 +138,21 @@ def sync(body: dict) -> dict:
     return _ctl("sync", peer=body.get("peer", ""))
 
 
+@router.post("/peer-ping")
+def peer_ping(body: dict) -> dict:
+    return _ctl("ping", peer=body.get("peer", ""))
+
+
+@router.post("/unpair")
+def unpair(body: dict) -> dict:
+    return _ctl("unpair", peer=body.get("peer", ""))
+
+
+@router.get("/logs")
+def logs(limit: int = 60) -> dict:
+    return _ctl("logs", limit=limit)
+
+
 @router.post("/peer-profiles")
 def peer_profiles(body: dict) -> dict:
     return _ctl("peer_profiles", peer=body.get("peer", ""))

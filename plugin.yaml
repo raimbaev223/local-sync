@@ -25,6 +25,9 @@ provides_tools:
   - local_sync_sessions
   - local_sync_profiles
   - local_sync_import_profile
+  - local_sync_ping
+  - local_sync_unpair
+  - local_sync_logs
 
 config_schema:
   sync_interval:

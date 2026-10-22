@@ -1,0 +1,115 @@
+version: 1
+project: local-sync
+generated: '2026-10-23T00:00:27+06:00'
+generator: project-atlas
+nodes:
+  - id: core
+    name: core
+    parent: root
+    kind: library
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - __init__.py
+      - schemas.py
+      - tools.py
+    sourceHash: 1ef37f78f886
+    decisions: []
+    links: []
+    todo: []
+  - id: local-sync
+    name: local_sync
+    parent: root
+    kind: other
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - local_sync
+    sourceHash: ebfd7edb8c1b
+    decisions: []
+    links: []
+    todo: []
+  - id: dashboard
+    name: dashboard
+    parent: root
+    kind: service
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - dashboard
+    sourceHash: cfea8c36f36d
+    decisions: []
+    links: []
+    todo: []
+  - id: deploy
+    name: deploy
+    parent: root
+    kind: infra
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - deploy
+    sourceHash: 41f9450ff9b7
+    decisions: []
+    links: []
+    todo: []
+  - id: desktop
+    name: desktop
+    parent: root
+    kind: ui
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - desktop
+    sourceHash: b139fed26a3c
+    decisions: []
+    links: []
+    todo: []
+  - id: skills
+    name: skills
+    parent: root
+    kind: library
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - skills
+    sourceHash: e4c7471a2be3
+    decisions: []
+    links: []
+    todo: []
+  - id: cli-local-sync
+    name: CLI (local-sync)
+    parent: root
+    kind: interface
+    summary: ''
+    status: none
+    confidence: 0.2
+    locked: false
+    paths:
+      - bin/local-sync
+    sourceHash: d261e87f623a
+    decisions: []
+    links: []
+    todo: []
+orphans:
+  - path: design
+    files: 1
+    suggestParent: root
+    reason: папка вне карты · 1 файлов
+  - path: tests
+    files: 1
+    suggestParent: root
+    reason: папка вне карты · 1 файлов
+

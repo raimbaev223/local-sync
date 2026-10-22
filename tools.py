@@ -140,6 +140,18 @@ def import_profile(args: dict) -> str:
     return _run(go, args)
 
 
+def ping(args: dict) -> str:
+    return _run(lambda a: _call("ping", peer=a["peer"]), args)
+
+
+def unpair(args: dict) -> str:
+    return _run(lambda a: _call("unpair", peer=a["peer"]), args)
+
+
+def logs(args: dict) -> str:
+    return _run(lambda a: _call("logs", limit=int(a.get("limit") or 60)), args)
+
+
 HANDLERS = {
     "local_sync_status": status,
     "local_sync_peers": peers,
@@ -150,4 +162,7 @@ HANDLERS = {
     "local_sync_sessions": sessions,
     "local_sync_profiles": profiles,
     "local_sync_import_profile": import_profile,
+    "local_sync_ping": ping,
+    "local_sync_unpair": unpair,
+    "local_sync_logs": logs,
 }

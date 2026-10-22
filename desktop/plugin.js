@@ -72,6 +72,16 @@ const CSS = `
   background:color-mix(in srgb,var(--ui-accent) 7%,transparent)}
 .ls-handoff b{display:block;font-size:20px;letter-spacing:.22em;color:var(--ui-text-primary);margin-top:3px}
 .ls-log{margin:0;white-space:pre-wrap;color:var(--ui-text-tertiary);font-size:10.5px;max-height:150px;overflow:auto}
+.ls-journal{border:1px solid var(--ui-stroke-secondary);border-radius:10px;padding:8px;
+  display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
+.ls-entry{display:flex;gap:7px;font-size:10.5px;line-height:1.45;color:var(--ui-text-secondary);
+  padding:3px 4px;border-radius:5px}
+.ls-entry.error{background:color-mix(in srgb,var(--ui-red,#e06c75) 12%,transparent);
+  color:var(--ui-text-primary)}
+.ls-entry.warn{background:color-mix(in srgb,var(--ui-orange,#fbbf24) 10%,transparent)}
+.ls-time{color:var(--ui-text-tertiary);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.ls-msg{flex:1 1 auto;word-break:break-word}
+.ls-hintline{flex:1 0 100%;color:var(--ui-accent);padding-left:52px}
 `
 
 function makeApi(rest) {
@@ -92,6 +102,9 @@ function makeApi(rest) {
     sync: (peer) => call('/sync', { peer }),
     sessions: (peer) => call('/sessions', { peer }),
     profiles: (peer) => call('/peer-profiles', { peer }),
+    ping: (peer) => call('/peer-ping', { peer }),
+    unpair: (peer) => call('/unpair', { peer }),
+    logs: (limit = 40) => call('/logs?limit=' + limit),
     importProfile: (peer, profile, mode, localName) =>
       call('/import-profile', { peer, profile, mode, local_name: localName })
   }
@@ -170,13 +183,16 @@ function View({ api }) {
   const [profiles, setProfiles] = useState(null)
   const [draft, setDraft] = useState({})
   const [log, setLog] = useState('')
+  const [pings, setPings] = useState({})
+  const [entries, setEntries] = useState([])
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
-      const [st, peers] = await Promise.all([api.status(), api.peers()])
+      const [st, peers, journal] = await Promise.all([api.status(), api.peers(), api.logs(40)])
       setStatus(st)
       setTable(peers)
+      setEntries((journal && journal.entries) || [])
     } catch (err) {
       setLog(String(err && err.message ? err.message : err))
     }
@@ -202,8 +218,12 @@ function View({ api }) {
     }
   }
 
-  const peers = table.peers || []
-  const pending = table.pending || []
+  const me = status && status.me
+  // never show this machine to itself: a second local daemon can slip into discovery
+  const isSelf = (item) =>
+    Boolean(me) && (item.id === me.id || (item.machine && me.machine && item.machine === me.machine))
+  const peers = (table.peers || []).filter((peer) => !isSelf(peer))
+  const pending = (table.pending || []).filter((item) => !isSelf(item))
   const pairedCount = peers.filter((peer) => peer.paired).length
   const searchOn = !!(status && status.search)
 
@@ -334,7 +354,11 @@ function View({ api }) {
                           jsxs('div', {
                             children: [
                               jsx('div', { className: 'ls-nm', children: peer.name }),
-                              jsx('div', { className: 'ls-meta', children: `${peer.profile} · ${peer.addr}` })
+                              jsx('div', {
+                                className: 'ls-meta',
+                                children: `${peer.profile} · ${peer.addr}` +
+                                  (pings[peer.name] !== undefined ? ` · ${pings[peer.name]} мс` : '')
+                              })
                             ]
                           }),
                           jsx('span', {
@@ -362,6 +386,30 @@ function View({ api }) {
                                   }
                                 },
                                 children: 'Профили'
+                              }),
+                              jsx('button', {
+                                className: 'ls-act',
+                                disabled: busy,
+                                onClick: async () => {
+                                  try {
+                                    const answer = await api.ping(peer.name)
+                                    setPings({ ...pings, [peer.name]: answer.ms })
+                                    setLog(`пинг ${peer.name}: ${answer.ms} мс` + (answer.repaired ? ' · адрес обновлён' : ''))
+                                  } catch (err) {
+                                    setPings({ ...pings, [peer.name]: '—' })
+                                    setLog(`пинг ${peer.name}: ` + String(err && err.message ? err.message : err))
+                                  }
+                                },
+                                children: 'Пинг'
+                              }),
+                              jsx('button', {
+                                className: 'ls-act',
+                                disabled: busy,
+                                onClick: () => {
+                                  if (!window.confirm(`Отключить ${peer.name}? Ключ пары будет удалён.`)) return
+                                  act(() => api.unpair(peer.name), `отключено ${peer.name}`)
+                                },
+                                children: 'Отключить'
                               })
                             ]
                           })
@@ -441,7 +489,48 @@ function View({ api }) {
                     ]
                   })
                 : null,
-              log ? jsx('pre', { className: 'ls-log', children: log }) : null
+              log ? jsx('pre', { className: 'ls-log', children: log }) : null,
+              entries.length
+                ? jsxs('div', {
+                    className: 'ls-journal',
+                    children: [
+                      jsxs('div', {
+                        className: 'ls-row',
+                        children: [
+                          jsx('span', { className: 'ls-meta', children: 'журнал' }),
+                          jsx('button', {
+                            className: 'ls-act',
+                            onClick: () => {
+                              const text = entries
+                                .map((entry) => `${new Date(entry.ts * 1000).toLocaleTimeString()} ${entry.level} ${entry.message}${entry.hint ? ' → ' + entry.hint : ''}`)
+                                .join('\n')
+                              if (navigator.clipboard) navigator.clipboard.writeText(text)
+                              setLog('журнал скопирован в буфер')
+                            },
+                            children: 'Копировать'
+                          })
+                        ]
+                      }),
+                      ...entries.slice(-30).reverse().map((entry, index) =>
+                        jsxs(
+                          'div',
+                          {
+                            className: 'ls-entry ' + (entry.level || 'info'),
+                            children: [
+                              jsx('span', {
+                                className: 'ls-time',
+                                children: new Date(entry.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                              }),
+                              jsx('span', { className: 'ls-msg', children: entry.message }),
+                              entry.hint ? jsx('span', { className: 'ls-hintline', children: '↳ ' + entry.hint }) : null
+                            ]
+                          },
+                          entry.ts + ':' + index
+                        )
+                      )
+                    ]
+                  })
+                : null
             ]
           })
         ]

@@ -138,4 +138,43 @@ IMPORT_PROFILE = {
     },
 }
 
-TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS, PROFILES, IMPORT_PROFILE]
+PING = {
+    "name": "local_sync_ping",
+    "description": (
+        "Check that a peer is reachable right now and how fast (round-trip milliseconds). "
+        "Repairs the stored address if the peer came back on a different port. Use when sync "
+        "fails or the user asks whether the other machine is online."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"peer": {"type": "string"}},
+        "required": ["peer"],
+    },
+}
+
+UNPAIR = {
+    "name": "local_sync_unpair",
+    "description": (
+        "Forget a paired device: removes the shared key, the pair and its pending requests. "
+        "Files already synced stay where they are. Use when the user wants to disconnect a machine."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"peer": {"type": "string"}},
+        "required": ["peer"],
+    },
+}
+
+LOGS = {
+    "name": "local_sync_logs",
+    "description": (
+        "Recent daemon log entries with level and a fix hint when something failed. Use to "
+        "diagnose why pairing or syncing did not work; the full log file path is returned too."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"limit": {"type": "integer", "description": "How many entries (default 60)"}},
+    },
+}
+
+TOOLS = [STATUS, PEERS, PAIR, ACCEPT, PLAN, APPLY, SESSIONS, PROFILES, IMPORT_PROFILE, PING, UNPAIR, LOGS]

@@ -26,6 +26,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from collections import deque
 import threading
 import time
 import urllib.error
@@ -49,8 +50,35 @@ EXCLUDE_NAMES = {"executions.db", ".usage.json", ".usage.json.lock"}
 AUTH_WINDOW = 300
 
 
-def log(msg: str) -> None:
+LOG_SINK = None  # set by the daemon: (level, message, hint) -> None
+
+HINTS = (
+    ("not visible", "включи поиск на обеих машинах и проверь, что демон пира запущен"),
+    ("не видно", "включи поиск на обеих машинах и проверь, что демон пира запущен"),
+    ("401", "пара устарела после переустановки — отключи устройство и спарь заново"),
+    ("unauthorized", "пара устарела после переустановки — отключи устройство и спарь заново"),
+    ("address already in use", "уже запущен второй демон — убей лишний процесс"),
+    ("wrong password", "код не совпал: введи тот, что показан на первой машине"),
+    ("пароли не совпали", "код не совпал: введи тот, что показан на первой машине"),
+    ("too large", "снапшот истории больше лимита — почисти старые сессии"),
+)
+
+
+def hint_for(message: str) -> str:
+    lowered = message.lower()
+    for needle, hint in HINTS:
+        if needle in lowered:
+            return hint
+    return ""
+
+
+def log(msg: str, level: str = "info") -> None:
     print(f"[local-sync] {msg}", file=sys.stderr, flush=True)
+    if LOG_SINK is not None:
+        try:
+            LOG_SINK(level, msg, hint_for(msg))
+        except Exception:
+            pass
 
 
 def notify(title: str, body: str, enabled: bool = True) -> None:
@@ -393,6 +421,20 @@ class PeerClient:
         return self._request("GET", "/sessions")
 
 
+def key_works(addr: str, port: int, peer_id: str, key_hex: str, timeout: float = 2.0) -> bool:
+    """Does this endpoint actually accept the pair key? (guards against a stray instance)"""
+    try:
+        ts = str(int(time.time()))
+        message = f"GET:/ping:{ts}"
+        signature = hmac.new(bytes.fromhex(key_hex), message.encode(), hashlib.sha256).hexdigest()
+        request = urllib.request.Request(f"http://{addr}:{port}/ping",
+                                         headers={"X-Hermes-Sync": f"{peer_id}:{ts}:{signature}"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def find_addr(daemon: "SyncDaemon", peer_id: str) -> str:
     with daemon.lock:
         info = daemon.peers.get(peer_id)
@@ -651,6 +693,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         peer_id = self._auth("GET", self.path)
         if not peer_id:
             return self._json(401, {"error": "unauthorized"})
+        if path == "/ping":
+            return self._json(200, {"ok": True, **self.store.me})
         if path == "/profiles":
             profiles = [{"name": name, **profile_summary(directory)}
                         for name, directory in known_profiles(self.store).items()]
@@ -751,6 +795,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if removed:
                     self.store.save()
                 result = {"denied": removed}
+            elif op == "ping":
+                result = self.daemon.ping(args["peer"])
+            elif op == "unpair":
+                result = self.daemon.unpair(args["peer"])
+            elif op == "logs":
+                result = self.daemon.logs(int(args.get("limit") or 200))
             elif op == "clear_requests":
                 result = self.daemon.clear_requests()
             elif op == "pair_auto":
@@ -901,6 +951,10 @@ class SyncDaemon:
     def __init__(self, store: Store, bind: str = "0.0.0.0", api_port: int | None = None,
                  beacon_port: int | None = None):
         self.store = store
+        self.log_buffer: deque = deque(maxlen=400)
+        self.log_file = store.home / "logs" / "local-sync.jsonl"
+        global LOG_SINK
+        LOG_SINK = self._record_log
         # One daemon per state dir. A second one would beacon the same identity from
         # the same host and make every peer see this machine twice.
         import fcntl
@@ -1054,14 +1108,23 @@ class SyncDaemon:
             # under a new id. Move the pair key over instead of losing the pair.
             with self.lock:
                 for pid, known in list(self.store.state["peers"].items()):
-                    if pid != record["id"] and (known.get("name"), known.get("profile")) == (record["name"], record["profile"]):
+                    if pid == record["id"] or (known.get("name"), known.get("profile")) != (record["name"], record["profile"]):
+                        continue
+                    # Only adopt a new instance if it proves it holds the pair key. A second
+                    # daemon on the same machine answers /hello happily but 401s on everything
+                    # else, and following it broke sync with a perfectly good pair.
+                    if key_works(record["addr"], record["api_port"], known.get("id") or pid, known.get("key", "")):
                         migrated = {**known, "addr": record["addr"], "api_port": record["api_port"],
                                     "beacon_port": record["beacon_port"] or known.get("beacon_port")}
                         self.store.state["peers"][record["id"]] = migrated
                         del self.store.state["peers"][pid]
                         self.store.save()
                         log(f"peer {record['name']} came back as a new instance — pair moved to {record['id'][:8]}")
-                        break
+                    else:
+                        log(f"{record['name']} answers on another port without our pair key "
+                            f"— похоже, на пире запущено несколько демонов", "warn")
+                        record["paired"] = False
+                    break
                 # one row per machine+profile: a re-installed peer may reappear under a new id
                 for known_id, known in list(self.peers.items()):
                     if known_id != record["id"] and (known["name"], known["profile"]) == (record["name"], record["profile"]):
@@ -1071,10 +1134,7 @@ class SyncDaemon:
                 self.peers[record["id"]] = record
             if fresh:
                 log(f"discovered {record['name']} ({record['profile']}) at {record['addr']}:{record['api_port']}")
-                if record["id"] not in self.store.state["peers"]:
-                    self.notify_user("local-sync: рядом устройство",
-                                     f"{record['name']} ({record['profile']}) — подключить? "
-                                     f"local-sync pair {record['name']}")
+                # no toast on discovery on purpose: a busy LAN would spam notifications
                 self._emit({"type": "peer_found", **record})
 
     def _emit(self, event: dict) -> None:
@@ -1122,7 +1182,8 @@ class SyncDaemon:
     def peer_table(self) -> dict:
         with self.lock:
             visible = [{"id": pid, "name": p["name"], "profile": p["profile"], "addr": p["addr"],
-                        "api_port": p["api_port"], "paired": pid in self.store.state["peers"]}
+                        "machine": p.get("machine", ""), "api_port": p["api_port"],
+                        "paired": pid in self.store.state["peers"]}
                        for pid, p in self.peers.items()]
         pending = [{"id": p["peer_id"], "name": p.get("peer_name"), "profile": p.get("peer_profile"),
                     "pair_id": p.get("pair_id"), "kind": p.get("kind", "code"),
@@ -1150,6 +1211,87 @@ class SyncDaemon:
         return {"cleared": cleared}
 
     # discovery control (manual mode) --------------------------------------
+    # diagnostics ----------------------------------------------------------
+    def _record_log(self, level: str, message: str, hint: str) -> None:
+        entry = {"ts": time.time(), "level": level, "message": message, "hint": hint}
+        self.log_buffer.append(entry)
+        try:
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            if self.log_file.exists() and self.log_file.stat().st_size > 2_000_000:
+                self.log_file.replace(self.log_file.with_name("local-sync.1.jsonl"))
+            with open(self.log_file, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    def logs(self, limit: int = 200) -> dict:
+        return {"entries": list(self.log_buffer)[-max(1, limit):],
+                "file": str(self.log_file), "total": len(self.log_buffer)}
+
+    def ping(self, needle: str) -> dict:
+        """Reconnect check: is the peer reachable right now, and how fast."""
+        peer_id = None
+        try:
+            peer_id = self.resolve(needle, wait=1.0)
+        except AuthError:
+            peer_id = None
+        record = None
+        if peer_id:
+            record = self.peers.get(peer_id)
+        else:
+            for known_id, info in self.store.state["peers"].items():
+                if needle in (known_id, known_id[:8], info.get("name"), f"{info.get('name')}/{info.get('profile')}"):
+                    peer_id = known_id
+                    record = {"id": known_id, **info}
+                    break
+        if not record or not record.get("addr"):
+            raise AuthError(f"устройство {needle} не найдено в сети и нет сохранённого адреса")
+        started = time.time()
+        stored_key = (self.store.state["peers"].get(peer_id) or {}).get("key")
+        auth_ok = None
+        if stored_key:
+            auth_ok = key_works(record["addr"], record["api_port"], peer_id or "", stored_key, timeout=3)
+        request = urllib.request.Request(f"http://{record['addr']}:{record['api_port']}/hello", method="GET")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            identity = json.loads(response.read())
+        elapsed = round((time.time() - started) * 1000)
+        repaired = False
+        stored = self.store.state["peers"].get(peer_id)
+        if stored and (stored.get("addr") != record.get("addr") or stored.get("api_port") != record.get("api_port")):
+            stored["addr"] = record.get("addr")
+            stored["api_port"] = record.get("api_port")
+            stored["beacon_port"] = record.get("beacon_port") or stored.get("beacon_port")
+            self.store.save()
+            repaired = True
+            log(f"reconnected {stored.get('name')} at {record['addr']}:{record['api_port']}", "warn")
+        result = {"ok": True, "ms": elapsed, "peer": identity.get("name", record.get("name")),
+                  "profile": identity.get("profile"), "addr": record.get("addr"),
+                  "api_port": record.get("api_port"), "repaired": repaired}
+        if auth_ok is False:
+            result["auth"] = False
+            result["hint"] = ("устройство отвечает, но не принимает ключ пары — вероятно, на нём "
+                              "запущено несколько демонов или пара устарела: «Отключить» и спарь заново")
+        elif auth_ok is True:
+            result["auth"] = True
+        return result
+
+    def unpair(self, needle: str) -> dict:
+        peer_id = None
+        name = needle
+        for known_id, info in self.store.state["peers"].items():
+            if needle in (known_id, known_id[:8], info.get("name"), f"{info.get('name')}/{info.get('profile')}"):
+                peer_id, name = known_id, info.get("name", needle)
+                break
+        if not peer_id:
+            raise AuthError(f"{needle} не спарен с этой машиной")
+        self.store.state["peers"].pop(peer_id, None)
+        for pair_id, item in list(self.store.state["pending"].items()):
+            if item.get("peer_id") == peer_id:
+                self.store.state["pending"].pop(pair_id, None)
+        self.store.save()
+        log(f"unpaired {name} — спаривание и ключ удалены", "warn")
+        return {"removed": True, "peer": name}
+
     def peer_profiles(self, peer_id: str) -> dict:
         client = PeerClient(self.store, peer_id, find_addr(self, peer_id))
         answer = client.profiles()
@@ -1625,14 +1767,24 @@ def cmd_sync(args) -> int:
 
 
 def _resolve_peer(store: Store, daemon: SyncDaemon, needle: str, deadline: float) -> str | None:
-    """Match a peer by id, short id, name or name/profile among peers seen on the LAN."""
+    """Match a peer by id, short id, name or name/profile among peers seen on the LAN.
+
+    When several instances of the same machine answer (two daemons, same host), the
+    paired one wins — following the other instance is a guaranteed 401.
+    """
     while time.time() < deadline:
         with daemon.lock:
+            fallback = None
             for pid, info in daemon.peers.items():
                 names = {pid, pid[:8], str(info.get("name")),
                          f"{info.get('name')}/{info.get('profile')}"}
-                if needle in names:
+                if needle not in names:
+                    continue
+                if pid in store.state["peers"]:
                     return pid
+                fallback = fallback or pid
+            if fallback:
+                return fallback
         time.sleep(0.3)
     return None
 
@@ -1738,6 +1890,40 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_ping(args) -> int:
+    store = Store(Path(args.home))
+    ensure_daemon(store)
+    answer = ctl(store, "ping", peer=args.peer)
+    _print(answer.get("result") if answer and answer.get("ok") else {"ok": False, "error": (answer or {}).get("error")})
+    return 0 if answer and answer.get("ok") else 1
+
+
+def cmd_unpair(args) -> int:
+    store = Store(Path(args.home))
+    ensure_daemon(store)
+    answer = ctl(store, "unpair", peer=args.peer)
+    _print(answer.get("result") if answer and answer.get("ok") else {"ok": False, "error": (answer or {}).get("error")})
+    return 0 if answer and answer.get("ok") else 1
+
+
+def cmd_logs(args) -> int:
+    store = Store(Path(args.home))
+    ensure_daemon(store)
+    answer = ctl(store, "logs", limit=args.tail)
+    if not (answer and answer.get("ok")):
+        _print({"ok": False, "error": (answer or {}).get("error")})
+        return 1
+    for entry in answer["result"]["entries"]:
+        stamp = time.strftime("%H:%M:%S", time.localtime(entry["ts"]))
+        level = entry.get("level", "info")
+        line = f"{stamp} {level:<5} {entry['message']}"
+        if entry.get("hint"):
+            line += f"\n            ↳ {entry['hint']}"
+        print(line)
+    print(f"\nфайл: {answer['result']['file']}")
+    return 0
+
+
 def cmd_search(args) -> int:
     store = Store(Path(args.home))
     ensure_daemon(store)          # discovery needs the daemon; start it if it is down
@@ -1797,6 +1983,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show local identity and sync state")
     search = sub.add_parser("search", help="turn LAN discovery on/off (manual mode)")
     search.add_argument("state", nargs="?", choices=["on", "off"])
+    ping = sub.add_parser("ping", help="check a peer is reachable and how fast")
+    ping.add_argument("peer")
+    unpair = sub.add_parser("unpair", help="forget a paired device and its key")
+    unpair.add_argument("peer")
+    logs = sub.add_parser("logs", help="show recent daemon log entries")
+    logs.add_argument("--tail", type=int, default=60)
     p = sub.add_parser("pair", help="initiate pairing with a discovered peer")
     p.add_argument("peer")
     p.add_argument("--password", help="use the shared-password handshake instead of a code")
@@ -1816,6 +2008,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {"init": cmd_init, "run": cmd_run, "mcp": cmd_mcp, "ui": cmd_ui,
                 "peers": cmd_peers, "status": cmd_status, "search": cmd_search,
+                "ping": cmd_ping, "unpair": cmd_unpair, "logs": cmd_logs,
                 "pair": cmd_pair, "accept": cmd_accept, "plan": cmd_plan, "sync": cmd_sync}
     return handlers[args.cmd](args)
 

@@ -1,0 +1,540 @@
+{
+  "schema": 1,
+  "scanned_at": "2026-10-23T00:00:27+06:00",
+  "root": "/Users/erkin/algo/local-sync",
+  "name": "local-sync",
+  "vcs": {
+    "type": "git",
+    "branch": "main",
+    "head": "98a3765",
+    "dirty": true,
+    "commits": [
+      {
+        "sha": "98a3765",
+        "date": "2026-10-22",
+        "subject": "README: a screenshot of the UI, plus the stale tree numbers"
+      },
+      {
+        "sha": "c7b6a8f",
+        "date": "2026-10-22",
+        "subject": "Pairing requests: one per device, and a way to clear the list"
+      },
+      {
+        "sha": "ec10aae",
+        "date": "2026-10-22",
+        "subject": "Import modes: merge / rebase / rename when the profile name is taken"
+      },
+      {
+        "sha": "9b7c6a5",
+        "date": "2026-10-22",
+        "subject": "Radar UI for the sync page"
+      },
+      {
+        "sha": "b9f9540",
+        "date": "2026-10-22",
+        "subject": "See and import the peer profiles; sidebar label"
+      },
+      {
+        "sha": "be868aa",
+        "date": "2026-10-22",
+        "subject": "Keep the pair when a peer restarts under a new instance id"
+      },
+      {
+        "sha": "633d0dc",
+        "date": "2026-10-22",
+        "subject": "One daemon per host, generated pairing code, session history copy; sidebar label"
+      },
+      {
+        "sha": "e6492a7",
+        "date": "2026-10-22",
+        "subject": "desktop: full page + sidebar nav row instead of a pane tab"
+      },
+      {
+        "sha": "66a251a",
+        "date": "2026-10-22",
+        "subject": "plugin.yaml: floor Hermes at 0.21.5, real homepage URL"
+      },
+      {
+        "sha": "f59fd41",
+        "date": "2026-10-22",
+        "subject": "CLI: search/peers/status start the daemon instead of printing stale state"
+      },
+      {
+        "sha": "71bf66f",
+        "date": "2026-10-22",
+        "subject": "Sanitize paths for public use; add MIT license"
+      },
+      {
+        "sha": "ca1f35a",
+        "date": "2026-10-22",
+        "subject": "local-sync: desktop half autostarts the daemon; README sidebar steps"
+      },
+      {
+        "sha": "e9f0ecc",
+        "date": "2026-10-22",
+        "subject": "local-sync: desktop pane + dashboard API half"
+      },
+      {
+        "sha": "7b3cfb2",
+        "date": "2026-10-22",
+        "subject": "local-sync: numeric PIN (min 4), search CLI, UI hints"
+      },
+      {
+        "sha": "556d6a4",
+        "date": "2026-10-22",
+        "subject": "local-sync: manual mode, password handshake, local UI with HITL"
+      },
+      {
+        "sha": "edcc0a3",
+        "date": "2026-10-22",
+        "subject": "README: plugin usage, install, daemon service"
+      },
+      {
+        "sha": "d8d5f7c",
+        "date": "2026-10-22",
+        "subject": "local-sync 0.1.0: LAN discovery, pairing, three-way merge, plugin tools"
+      }
+    ]
+  },
+  "inventory": {
+    "total": 21,
+    "bytes": 201934,
+    "by_ext": [
+      {
+        "ext": ".py",
+        "files": 9
+      },
+      {
+        "ext": "(none)",
+        "files": 3
+      },
+      {
+        "ext": ".md",
+        "files": 2
+      },
+      {
+        "ext": ".json",
+        "files": 1
+      },
+      {
+        "ext": ".plist",
+        "files": 1
+      },
+      {
+        "ext": ".service",
+        "files": 1
+      },
+      {
+        "ext": ".html",
+        "files": 1
+      },
+      {
+        "ext": ".js",
+        "files": 1
+      },
+      {
+        "ext": ".yaml",
+        "files": 1
+      },
+      {
+        "ext": ".toml",
+        "files": 1
+      }
+    ],
+    "dirs": [
+      {
+        "path": "local_sync",
+        "files": 4,
+        "direct": 4
+      },
+      {
+        "path": "dashboard",
+        "files": 2,
+        "direct": 2
+      },
+      {
+        "path": "deploy",
+        "files": 2,
+        "direct": 2
+      },
+      {
+        "path": "bin",
+        "files": 1,
+        "direct": 1
+      },
+      {
+        "path": "design",
+        "files": 1,
+        "direct": 1
+      },
+      {
+        "path": "desktop",
+        "files": 1,
+        "direct": 1
+      },
+      {
+        "path": "skills",
+        "files": 1,
+        "direct": 0
+      },
+      {
+        "path": "skills/local-sync",
+        "files": 1,
+        "direct": 1
+      },
+      {
+        "path": "tests",
+        "files": 1,
+        "direct": 1
+      }
+    ],
+    "top": [
+      {
+        "path": "bin",
+        "name": "bin",
+        "dir": true,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "dashboard",
+        "name": "dashboard",
+        "dir": true,
+        "files": 2,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "deploy",
+        "name": "deploy",
+        "dir": true,
+        "files": 2,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "design",
+        "name": "design",
+        "dir": true,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "desktop",
+        "name": "desktop",
+        "dir": true,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "local_sync",
+        "name": "local_sync",
+        "dir": true,
+        "files": 4,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "skills",
+        "name": "skills",
+        "dir": true,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "tests",
+        "name": "tests",
+        "dir": true,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": ".gitignore",
+        "name": ".gitignore",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "__init__.py",
+        "name": "__init__.py",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "LICENSE",
+        "name": "LICENSE",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "plugin.yaml",
+        "name": "plugin.yaml",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "pyproject.toml",
+        "name": "pyproject.toml",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "README.md",
+        "name": "README.md",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "schemas.py",
+        "name": "schemas.py",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      },
+      {
+        "path": "tools.py",
+        "name": "tools.py",
+        "dir": false,
+        "files": 1,
+        "repo": false,
+        "manifest": null
+      }
+    ]
+  },
+  "manifests": [
+    {
+      "path": "pyproject.toml",
+      "kind": "pyproject.toml",
+      "name": "local-sync",
+      "version": "0.1.0",
+      "workspaces": [],
+      "scripts": {},
+      "deps": [],
+      "deps_count": 0,
+      "entrypoints": []
+    }
+  ],
+  "services": [],
+  "entrypoints": [
+    {
+      "path": "bin/local-sync",
+      "kind": "bin",
+      "evidence": "#!/usr/bin/env python3"
+    },
+    {
+      "path": "local_sync/__main__.py",
+      "kind": "file",
+      "evidence": "conventional entry filename"
+    }
+  ],
+  "routes": [
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/status",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/peers",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/search",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/pair",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/accept",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/deny",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/clear-requests",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/plan",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/sync",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/peer-ping",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/unpair",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/logs",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/peer-profiles",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/import-profile",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/sessions",
+      "framework": "fastapi/flask"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/status",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/peers",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/search",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/pair",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/accept",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/deny",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/clear-requests",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/plan",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/sync",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/peer-ping",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/unpair",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "GET",
+      "path": "/logs",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/peer-profiles",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/import-profile",
+      "framework": "express/fastify/hono"
+    },
+    {
+      "file": "dashboard/plugin_api.py",
+      "method": "POST",
+      "path": "/sessions",
+      "framework": "express/fastify/hono"
+    }
+  ],
+  "docs": [
+    {
+      "path": "README.md",
+      "title": "local-sync",
+      "bytes": 12425
+    }
+  ],
+  "todos": [],
+  "warnings": [],
+  "scan_ms": 116
+}
