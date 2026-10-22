@@ -1130,6 +1130,7 @@ def _print(payload) -> None:
 
 def cmd_peers(args) -> int:
     store = Store(Path(args.home))
+    ensure_daemon(store)
     answer = ctl(store, "peers")
     if answer and answer.get("ok"):
         _print(answer["result"])
@@ -1148,6 +1149,7 @@ def cmd_peers(args) -> int:
 
 def cmd_status(args) -> int:
     store = Store(Path(args.home))
+    ensure_daemon(store)
     answer = ctl(store, "status")
     if answer and answer.get("ok"):
         _print(answer["result"])
@@ -1394,6 +1396,7 @@ def cmd_mcp(args) -> int:
 
 def cmd_search(args) -> int:
     store = Store(Path(args.home))
+    ensure_daemon(store)          # discovery needs the daemon; start it if it is down
     if args.state is None:
         answer = ctl(store, "status")
         if answer and answer.get("ok"):
